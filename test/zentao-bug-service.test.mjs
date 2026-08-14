@@ -96,6 +96,31 @@ test("getBugDetail extracts deduplicated images from steps files and action comm
   assert.equal(detail.actions[0].comment, "comment");
 });
 
+test("getBugDetail preserves the legacy string-user summaries", async () => {
+  const bug = {
+    id: 1,
+    openedBy: "opened",
+    assignedTo: "assigned",
+    resolvedBy: "resolved",
+    closedBy: "closed",
+    lastEditedBy: "edited",
+    actions: [{ id: 2, actor: "actor" }],
+  };
+  const service = createZentaoBugService({
+    baseUrl: "http://zentao.test",
+    client: { get: async () => bug },
+  });
+
+  const detail = await service.getBugDetail({ bugId: 1, includeActions: true });
+
+  assert.deepEqual(detail.openedBy, { account: "opened" });
+  assert.deepEqual(detail.assignedTo, { account: "assigned" });
+  assert.deepEqual(detail.resolvedBy, { account: "resolved" });
+  assert.deepEqual(detail.closedBy, { account: "closed" });
+  assert.deepEqual(detail.lastEditedBy, { account: "edited" });
+  assert.deepEqual(detail.actions[0].actor, { account: "actor" });
+});
+
 test("collectBugImages accepts object files and retains the first occurrence of a duplicate file", () => {
   const images = collectBugImages({
     steps: '<img src="/file?fileID=10" alt="from steps">',
