@@ -5,18 +5,20 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-import { updateEnvToken } from "./lib/env-file.mjs";
 import { createMcpOutput, plainText } from "./lib/mcp-output.mjs";
-import { loadRuntimeConfig } from "./lib/runtime-config.mjs";
-import { createZentaoClient } from "./lib/zentao-client.mjs";
+import { createRuntimeClient } from "./lib/runtime-client.mjs";
 
 const projectDirectory = path.dirname(fileURLToPath(import.meta.url));
 const envPath = path.join(projectDirectory, ".env");
-const runtimeConfig = loadRuntimeConfig(envPath);
-const client = createZentaoClient({
-  ...runtimeConfig,
+const credentialLauncherPath = path.join(
+  projectDirectory,
+  "scripts",
+  "configure-credentials.command",
+);
+const client = createRuntimeClient({
+  envPath,
+  launcherPath: credentialLauncherPath,
   fetchImpl: fetch,
-  persistToken: (token) => updateEnvToken(envPath, token),
 });
 
 const zentaoGet = (path, query) => client.get(path, query);
