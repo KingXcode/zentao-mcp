@@ -24,6 +24,24 @@ function makeClient(overrides = {}) {
   });
 }
 
+test("image output returns only base64 image content", () => {
+  const client = makeClient();
+  const { image } = createMcpOutput(client.redactOutbound, client.containsOutboundSecret);
+
+  const result = image(Uint8Array.from([0x89, 0x50, 0x4e, 0x47]), "image/png");
+
+  assert.deepEqual(result, {
+    content: [{ type: "image", data: "iVBORw==", mimeType: "image/png" }],
+  });
+});
+
+test("image output rejects unsupported MIME types", () => {
+  const client = makeClient();
+  const { image } = createMcpOutput(client.redactOutbound, client.containsOutboundSecret);
+
+  assert.throws(() => image(Uint8Array.from([1]), "image/svg+xml"), /不受支持/);
+});
+
 test("final MCP output redacts secrets reconstructed by business mapping", async () => {
   const client = makeClient({
     fetchImpl: async () =>

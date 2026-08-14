@@ -5,7 +5,9 @@
 - `list_projects`：查询项目列表
 - `list_products`：查询当前 Token 可访问的产品及其 ID
 - `get_product_bugs`：查询产品 Bug
+- `list_project_bugs`：按项目、状态和负责人查询 Bug，并返回禅道链接
 - `get_bug_detail`：根据 Bug ID 查询完整详情，可选返回操作历史
+- `get_bug_image`：读取已确认属于指定 Bug 的 PNG、JPEG、GIF 或 WebP 图片
 - `get_execution_tasks`：查询迭代任务
 
 默认按禅道 RESTful API v1 编写。
@@ -96,6 +98,10 @@ codex mcp remove zentao
 
 ```text
 查询禅道产品 1 中尚未关闭的 Bug，按负责人分组，标出高优先级问题。
+```
+
+```text
+列出瑞丰Flutter-PC 项目中指派给我的 active 和 confirmed Bug，附禅道链接；等我选择 Bug ID 后再读取详情和图片。
 ```
 
 ```text

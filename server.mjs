@@ -5,8 +5,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-import { createMcpOutput, plainText } from "./lib/mcp-output.mjs";
+import { createMcpOutput } from "./lib/mcp-output.mjs";
 import { createRuntimeClient } from "./lib/runtime-client.mjs";
+import { createZentaoBugService } from "./lib/zentao-bug-service.mjs";
 
 const projectDirectory = path.dirname(fileURLToPath(import.meta.url));
 const envPath = path.join(projectDirectory, ".env");
@@ -20,9 +21,10 @@ const client = createRuntimeClient({
   launcherPath: credentialLauncherPath,
   fetchImpl: fetch,
 });
+const bugService = createZentaoBugService({ client, baseUrl: client.baseUrl });
 
 const zentaoGet = (path, query) => client.get(path, query);
-const { ok, fail } = createMcpOutput(
+const { ok, fail, image } = createMcpOutput(
   client.redactOutbound,
   client.containsOutboundSecret,
 );
@@ -30,15 +32,6 @@ const { ok, fail } = createMcpOutput(
 function accountOf(user) {
   if (!user) return "";
   return typeof user === "object" ? String(user.account || "") : String(user);
-}
-
-function userSummary(user) {
-  if (!user) return null;
-  if (typeof user !== "object") return { account: String(user) };
-  return {
-    account: user.account || "",
-    realname: user.realname || user.name || "",
-  };
 }
 
 async function getAllProductBugs(productId) {
@@ -176,6 +169,29 @@ server.registerTool(
 );
 
 server.registerTool(
+  "list_project_bugs",
+  {
+    title: "查询禅道项目 Bug",
+    description: "按项目、状态和指派人账号查询全部匹配 Bug，并返回可点击禅道链接。",
+    inputSchema: {
+      projectId: z.number().int().positive().default(502),
+      assigneeAccounts: z.array(z.string().min(1)).default([]),
+      includeCurrentUser: z.boolean().default(false),
+      statuses: z.array(z.enum(["active", "confirmed", "resolved", "closed", "delay", "postponed"]))
+        .default(["active", "confirmed"]),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
+  async (args) => {
+    try {
+      return ok(await bugService.listProjectBugs(args));
+    } catch (error) {
+      return fail(error);
+    }
+  },
+);
+
+server.registerTool(
   "get_bug_detail",
   {
     title: "查询禅道 Bug 详情",
@@ -187,64 +203,30 @@ server.registerTool(
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   },
-  async ({ bugId, includeActions }) => {
+  async (args) => {
     try {
-      const bug = await zentaoGet(`/bugs/${bugId}`);
-      const result = {
-        id: bug.id,
-        title: bug.title,
-        status: bug.status,
-        subStatus: bug.subStatus,
-        type: bug.type,
-        priority: bug.pri,
-        severity: bug.severity,
-        confirmed: bug.confirmed,
-        product: { id: bug.product, name: bug.productName || "" },
-        project: { id: bug.project, name: bug.projectName || "" },
-        execution: { id: bug.execution, name: bug.executionName || "" },
-        module: { id: bug.module, name: bug.moduleTitle || "" },
-        plan: { id: bug.plan, name: bug.planName || "" },
-        openedBuild: bug.openedBuild,
-        resolvedBuild: bug.resolvedBuild,
-        environment: {
-          os: bug.os,
-          browser: bug.browser,
-          hardware: bug.hardware,
-        },
-        steps: plainText(bug.steps),
-        openedBy: userSummary(bug.openedBy),
-        openedDate: bug.openedDate,
-        assignedTo: userSummary(bug.assignedTo),
-        assignedDate: bug.assignedDate,
-        deadline: bug.deadline,
-        resolution: bug.resolution,
-        resolvedBy: userSummary(bug.resolvedBy),
-        resolvedDate: bug.resolvedDate,
-        closedBy: userSummary(bug.closedBy),
-        closedDate: bug.closedDate,
-        activatedCount: bug.activatedCount,
-        activatedDate: bug.activatedDate,
-        lastEditedBy: userSummary(bug.lastEditedBy),
-        lastEditedDate: bug.lastEditedDate,
-        files: Object.values(bug.files || {}).map((file) => ({
-          id: file.id,
-          title: file.title,
-          extension: file.extension,
-          size: file.size,
-        })),
-      };
+      return ok(await bugService.getBugDetail(args));
+    } catch (error) {
+      return fail(error);
+    }
+  },
+);
 
-      if (includeActions) {
-        result.actions = (bug.actions || []).map((action) => ({
-          id: action.id,
-          actor: userSummary(action.actor),
-          action: action.action,
-          date: action.date,
-          comment: plainText(action.comment),
-        }));
-      }
-
-      return ok(result);
+server.registerTool(
+  "get_bug_image",
+  {
+    title: "读取禅道 Bug 图片",
+    description: "读取确认属于指定 Bug 正文、附件或操作历史的图片。",
+    inputSchema: {
+      bugId: z.number().int().positive(),
+      fileId: z.number().int().positive(),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
+  async (args) => {
+    try {
+      const result = await bugService.getBugImage(args);
+      return image(result.bytes, result.mimeType);
     } catch (error) {
       return fail(error);
     }
