@@ -72,12 +72,14 @@ Skill 应覆盖以下表达及同义请求：
 
 - `projectId`：正整数；Skill 默认传 `502`。
 - `assigneeAccounts`：可选账号数组；为空时不按指派人过滤。
+- `includeCurrentUser`：布尔值；为真时通过 `/user` 获取当前账号并加入人员过滤。
 - `statuses`：可选状态数组；Skill 默认传 `active` 和 `confirmed`。
 
 行为：
 
 - 调用 `/projects/{projectId}/bugs`。
 - 自动遍历全部分页并设置合理页数上限，避免只返回第一页或无限循环。
+- `includeCurrentUser` 为真时先读取 `/user`，不要求 Skill 接触账号配置。
 - 按账号字段过滤，不依赖列表接口是否带真实姓名。
 - 返回项目总量、匹配数量及 Bug 摘要。
 - 使用运行时配置的 `ZENTAO_BASE_URL` 生成页面链接，不在 Skill 中硬编码服务器地址。
