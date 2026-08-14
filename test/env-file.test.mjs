@@ -89,6 +89,7 @@ test("updateEnvToken round-trips every supported token character through runtime
     ["literal backslash-n", "token\\nwith\\nliterals"],
     ["line feed", "token\nwith\nlines"],
     ["carriage return", "token\rwith\rreturns"],
+    ["leading U+FEFF", "\uFEFFtoken"],
   ];
 
   for (const [name, token] of cases) {
