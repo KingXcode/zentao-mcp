@@ -4,11 +4,14 @@ import test from "node:test";
 
 import { createCredentialWizardLauncher } from "../lib/credential-wizard.mjs";
 
-function spawnedChild({ event = "spawn", error } = {}) {
+function spawnedChild({ event = "spawn", error, exitCode = 0 } = {}) {
   const child = new EventEmitter();
   child.unrefCount = 0;
   child.unref = () => { child.unrefCount += 1; };
-  queueMicrotask(() => child.emit(event, error));
+  queueMicrotask(() => {
+    child.emit(event, error);
+    if (event === "spawn") queueMicrotask(() => child.emit("close", exitCode));
+  });
   return child;
 }
 
@@ -83,6 +86,22 @@ test("launcher retries after an asynchronous open failure", async () => {
     assert.doesNotMatch(error.message, /secret failure/);
     return true;
   });
+  await launcher.open();
+  assert.equal(spawnCount, 2);
+});
+
+test("launcher rejects a nonzero open exit and retries on the next call", async () => {
+  let spawnCount = 0;
+  const launcher = createCredentialWizardLauncher({
+    launcherPath: "/project/scripts/configure-credentials.command",
+    platform: "darwin",
+    spawnImpl() {
+      spawnCount += 1;
+      return spawnedChild({ exitCode: spawnCount === 1 ? 1 : 0 });
+    },
+  });
+
+  await assert.rejects(launcher.open(), /无法打开禅道凭据配置终端/);
   await launcher.open();
   assert.equal(spawnCount, 2);
 });
