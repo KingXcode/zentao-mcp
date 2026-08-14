@@ -37,7 +37,7 @@
 - 修改 `.env.example`：加入机器人账号和密码配置。
 - 修改 `README.md`：记录自动登录、安全边界、配置和故障处理。
 
-### 任务 1：实现安全的 `.env` Token 持久化
+### Task 1：实现安全的 `.env` Token 持久化
 
 **文件：**
 - 创建：`lib/env-file.mjs`
@@ -221,7 +221,7 @@ git add package.json lib/env-file.mjs test/env-file.test.mjs
 git commit -m "feat: persist refreshed Zentao token safely"
 ```
 
-### 任务 2：实现认证、刷新和单次重试客户端
+### Task 2：实现认证、刷新和单次重试客户端
 
 **文件：**
 - 创建：`lib/zentao-client.mjs`
@@ -602,7 +602,7 @@ git add lib/zentao-client.mjs test/zentao-client.test.mjs
 git commit -m "feat: refresh expired Zentao tokens automatically"
 ```
 
-### 任务 3：接入 MCP 服务和安全加载配置
+### Task 3：接入 MCP 服务和安全加载配置
 
 **文件：**
 - 创建：`lib/runtime-config.mjs`
@@ -722,7 +722,7 @@ git add server.mjs start.sh package.json package-lock.json lib/runtime-config.mj
 git commit -m "feat: wire automatic authentication into MCP server"
 ```
 
-### 任务 4：更新配置示例和使用文档
+### Task 4：更新配置示例和使用文档
 
 **文件：**
 - 修改：`.env.example`
