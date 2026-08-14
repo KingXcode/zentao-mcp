@@ -1,58 +1,24 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-const baseUrl = requiredEnv("ZENTAO_BASE_URL").replace(/\/$/, "");
-const apiPrefix = (process.env.ZENTAO_API_PREFIX || "/api.php/v1").replace(/\/$/, "");
-const token = requiredEnv("ZENTAO_TOKEN");
-const timeoutMs = Number(process.env.ZENTAO_TIMEOUT_MS || 15000);
+import { updateEnvToken } from "./lib/env-file.mjs";
+import { loadRuntimeConfig } from "./lib/runtime-config.mjs";
+import { createZentaoClient } from "./lib/zentao-client.mjs";
 
-function requiredEnv(name) {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`缺少环境变量 ${name}`);
-  return value;
-}
+const projectDirectory = path.dirname(fileURLToPath(import.meta.url));
+const envPath = path.join(projectDirectory, ".env");
+const runtimeConfig = loadRuntimeConfig(envPath);
+const client = createZentaoClient({
+  ...runtimeConfig,
+  fetchImpl: fetch,
+  persistToken: (token) => updateEnvToken(envPath, token),
+});
 
-async function zentaoGet(path, query = {}) {
-  const url = new URL(`${baseUrl}${apiPrefix}${path}`);
-  for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined && value !== null && value !== "") {
-      url.searchParams.set(key, String(value));
-    }
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        Token: token,
-        Accept: "application/json",
-      },
-      signal: controller.signal,
-    });
-
-    const text = await response.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new Error(`禅道返回的不是 JSON：HTTP ${response.status}`);
-    }
-
-    if (!response.ok || data?.error || data?.status === "fail") {
-      const rawDetail = data?.message || data?.error || response.statusText;
-      const detail = typeof rawDetail === "string" ? rawDetail : JSON.stringify(rawDetail);
-      throw new Error(`禅道 API 请求失败：HTTP ${response.status} ${detail}`);
-    }
-
-    return data;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+const zentaoGet = (path, query) => client.get(path, query);
 
 function ok(value) {
   return {

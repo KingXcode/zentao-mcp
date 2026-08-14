@@ -1,0 +1,38 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+
+import { loadRuntimeConfig } from "../lib/runtime-config.mjs";
+
+test("loadRuntimeConfig reads an empty token and preserves a shell-sensitive password", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "zentao-runtime-config-test-"));
+  const envPath = path.join(directory, ".env");
+  await writeFile(
+    envPath,
+    [
+      "ZENTAO_BASE_URL=https://zentao.test/ ",
+      "ZENTAO_API_PREFIX= /api.php/v2/ ",
+      "ZENTAO_TOKEN=",
+      "ZENTAO_ACCOUNT= robot ",
+      'ZENTAO_PASSWORD="pa#$$ word"',
+      "ZENTAO_TIMEOUT_MS=2345",
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    assert.deepEqual(loadRuntimeConfig(envPath), {
+      envPath: path.resolve(envPath),
+      baseUrl: "https://zentao.test/",
+      apiPrefix: "/api.php/v2/",
+      initialToken: "",
+      account: "robot",
+      password: "pa#$$ word",
+      timeoutMs: 2345,
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
