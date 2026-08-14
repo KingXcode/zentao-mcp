@@ -73,6 +73,70 @@ test("loadRuntimeConfig preserves a legacy token that resembles an encoded envel
   }
 });
 
+test("loadRuntimeConfig preserves legacy plaintext credentials without encoding metadata", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "zentao-runtime-config-test-"));
+  const envPath = path.join(directory, ".env");
+  const account = "__ZENTAO_MCP_CREDENTIAL_V1__3.YWJj";
+  const password = "plain # password";
+  await writeFile(
+    envPath,
+    [
+      "ZENTAO_BASE_URL=https://zentao.test",
+      `ZENTAO_ACCOUNT="  ${account}  "`,
+      `ZENTAO_PASSWORD="${password}"`,
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    const config = loadRuntimeConfig(envPath);
+    assert.equal(config.account, account);
+    assert.equal(config.password, password);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+for (const { name, envelope } of [
+  { name: "missing envelope prefix", envelope: "plain-credential" },
+  { name: "malformed envelope", envelope: "__ZENTAO_MCP_CREDENTIAL_V1__x.YQ" },
+  { name: "length mismatch", envelope: "__ZENTAO_MCP_CREDENTIAL_V1__2.YQ" },
+  { name: "invalid base64url", envelope: "__ZENTAO_MCP_CREDENTIAL_V1__1.Y*" },
+  { name: "non-canonical base64url", envelope: "__ZENTAO_MCP_CREDENTIAL_V1__1.YR" },
+  { name: "invalid UTF-8", envelope: "__ZENTAO_MCP_CREDENTIAL_V1__1._w" },
+]) {
+  for (const field of ["ACCOUNT", "PASSWORD"]) {
+    test(`loadRuntimeConfig rejects encoded ${field.toLowerCase()} with ${name}`, async () => {
+      const directory = await mkdtemp(path.join(tmpdir(), "zentao-runtime-config-test-"));
+      const envPath = path.join(directory, ".env");
+      await writeFile(
+        envPath,
+        [
+          "ZENTAO_BASE_URL=https://zentao.test",
+          "ZENTAO_ACCOUNT=robot",
+          "ZENTAO_PASSWORD=secret",
+          `ZENTAO_${field}="${envelope}"`,
+          `ZENTAO_${field}_ENCODING=base64url-v1`,
+          "",
+        ].join("\n"),
+      );
+
+      try {
+        assert.throws(
+          () => loadRuntimeConfig(envPath),
+          (error) => {
+            assert.equal(error.message, "禅道凭据编码配置无效");
+            assert.equal(error.message.includes(envelope), false);
+            return true;
+          },
+        );
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+  }
+}
+
 for (const { name, token } of [
   { name: "missing envelope prefix", token: "plain-token" },
   { name: "malformed envelope", token: "__ZENTAO_MCP_TOKEN_V1__x.YQ" },
