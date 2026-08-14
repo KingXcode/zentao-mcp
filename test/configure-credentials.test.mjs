@@ -52,3 +52,41 @@ test("runCredentialWizard reports a fixed error and does not wait after persiste
   assert.match(writes.join(""), /保存禅道账号密码失败/);
   assert.doesNotMatch(writes.join(""), /leaked-account|leaked-password|disk failure/);
 });
+
+test("runCredentialWizard displays only fixed safe prompt errors", async (t) => {
+  for (const { name, promptError, expected } of [
+    {
+      name: "known cancellation",
+      promptError: new Error("已取消禅道凭据配置"),
+      expected: "已取消禅道凭据配置",
+    },
+    {
+      name: "unknown reader failure",
+      promptError: new Error("reader leaked-account and leaked-password"),
+      expected: "读取禅道凭据失败",
+    },
+  ]) {
+    await t.test(name, async () => {
+      const writes = [];
+      await assert.rejects(
+        runCredentialWizard({
+          envPath: "/project/.env",
+          input: {},
+          output: { write: (value) => writes.push(String(value)) },
+          promptImpl: async () => { throw promptError; },
+          persistImpl: async () => assert.fail("must not persist"),
+          waitForEnter: async () => assert.fail("must not wait"),
+        }),
+        (error) => {
+          assert.equal(error.message, expected);
+          return true;
+        },
+      );
+      assert.match(writes.join(""), new RegExp(expected));
+      assert.doesNotMatch(
+        writes.join(""),
+        /reader leaked|leaked-account|leaked-password/,
+      );
+    });
+  }
+});

@@ -7,6 +7,12 @@ import { promptForCredentials, readTtyLine } from "../lib/terminal-input.mjs";
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectDirectory = path.dirname(scriptDirectory);
 const defaultEnvPath = path.join(projectDirectory, ".env");
+const SAFE_PROMPT_ERRORS = new Set([
+  "已取消禅道凭据配置",
+  "禅道凭据配置必须在交互式终端中运行",
+  "读取禅道凭据失败",
+  "密码确认失败，未修改配置",
+]);
 
 async function defaultWaitForEnter({ input, output }) {
   await readTtyLine({
@@ -25,7 +31,23 @@ export async function runCredentialWizard({
   persistImpl = updateEnvCredentials,
   waitForEnter = defaultWaitForEnter,
 } = {}) {
-  const credentials = await promptImpl({ input, output });
+  let credentials;
+  try {
+    credentials = await promptImpl({ input, output });
+  } catch (error) {
+    const receivedMessage = error instanceof Error ? error.message : "";
+    const safeMessage = SAFE_PROMPT_ERRORS.has(receivedMessage)
+      ? receivedMessage
+      : "读取禅道凭据失败";
+    if (safeMessage !== "密码确认失败，未修改配置") {
+      try {
+        output.write(`${safeMessage}。\n`);
+      } catch {
+        // The terminal is already unusable; preserve the fixed safe error.
+      }
+    }
+    throw new Error(safeMessage);
+  }
   try {
     await persistImpl(envPath, credentials);
   } catch {

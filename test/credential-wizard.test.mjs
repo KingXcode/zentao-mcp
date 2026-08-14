@@ -48,7 +48,13 @@ test("launcher rejects non-macOS platforms without spawning a process", async ()
     },
   });
 
-  await assert.rejects(launcher.open(), /当前平台不支持自动打开禅道凭据配置终端/);
+  await assert.rejects(launcher.open(), (error) => {
+    assert.equal(
+      error.message,
+      "当前平台不支持自动打开禅道凭据配置终端；请在独立交互式终端运行固定启动器：/project/scripts/configure-credentials.command",
+    );
+    return true;
+  });
   assert.equal(called, false);
 });
 

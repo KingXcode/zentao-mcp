@@ -27,6 +27,16 @@ function fakeTty() {
   return { input, output, writes, rawModes };
 }
 
+async function outcomeByNextTurn(promise) {
+  return Promise.race([
+    promise.then(
+      (value) => ({ status: "fulfilled", value }),
+      (error) => ({ status: "rejected", error }),
+    ),
+    new Promise((resolve) => setImmediate(() => resolve({ status: "pending" }))),
+  ]);
+}
+
 test("readTtyLine hides password characters and restores raw mode", async () => {
   const { input, output, writes, rawModes } = fakeTty();
   const pending = readTtyLine({ input, output, prompt: "密码：", hidden: true });
@@ -63,6 +73,114 @@ test("readTtyLine rejects a non-TTY without changing terminal state", async () =
     /必须在交互式终端中运行/,
   );
   assert.deepEqual(rawModes, []);
+});
+
+test("readTtyLine cleans up when an asynchronous output write fails", async () => {
+  const { input, output, rawModes } = fakeTty();
+  let writeCount = 0;
+  output.write = () => {
+    writeCount += 1;
+    if (writeCount === 2) throw new Error("unsafe output failure");
+  };
+
+  const pending = readTtyLine({ input, output, prompt: "账号：", hidden: false });
+  assert.doesNotThrow(() => input.emit("data", Buffer.from("x")));
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.message, "读取禅道凭据失败");
+    assert.doesNotMatch(error.message, /unsafe output failure/);
+    return true;
+  });
+  assert.deepEqual(rawModes, [true, false]);
+  assert.equal(input.listenerCount("data"), 0);
+});
+
+for (const event of ["end", "close"]) {
+  test(`readTtyLine rejects and cleans up when input emits ${event}`, async () => {
+    const { input, output, rawModes } = fakeTty();
+    const pending = readTtyLine({ input, output, prompt: "密码：", hidden: true });
+    input.emit(event);
+    const outcome = await outcomeByNextTurn(pending);
+    assert.equal(outcome.status, "rejected");
+    assert.equal(outcome.error.message, "读取禅道凭据失败");
+    assert.deepEqual(rawModes, [true, false]);
+    assert.equal(input.listenerCount("data"), 0);
+  });
+}
+
+test("readTtyLine handles output stream errors through the same cleanup path", async () => {
+  const { input, rawModes } = fakeTty();
+  const output = new EventEmitter();
+  output.isTTY = true;
+  output.write = () => {};
+  const pending = readTtyLine({ input, output, prompt: "密码：", hidden: true });
+  assert.doesNotThrow(() => output.emit("error", new Error("unsafe stream failure")));
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.message, "读取禅道凭据失败");
+    assert.doesNotMatch(error.message, /unsafe stream failure/);
+    return true;
+  });
+  assert.deepEqual(rawModes, [true, false]);
+});
+
+test("readTtyLine settles safely when its final newline write fails", async () => {
+  const { input, output, rawModes } = fakeTty();
+  let writeCount = 0;
+  output.write = () => {
+    writeCount += 1;
+    if (writeCount === 2) throw new Error("unsafe newline failure");
+  };
+  const pending = readTtyLine({ input, output, prompt: "密码：", hidden: true });
+  assert.doesNotThrow(() => input.emit("data", Buffer.from("\r")));
+  const outcome = await outcomeByNextTurn(pending);
+  assert.equal(outcome.status, "rejected");
+  assert.equal(outcome.error.message, "读取禅道凭据失败");
+  assert.deepEqual(rawModes, [true, false]);
+});
+
+test("readTtyLine reports raw-mode restoration failures with a fixed error", async () => {
+  const { input, output, rawModes } = fakeTty();
+  input.setRawMode = (enabled) => {
+    rawModes.push(enabled);
+    if (!enabled) throw new Error("unsafe restore failure");
+    input.isRaw = enabled;
+  };
+  const pending = readTtyLine({ input, output, prompt: "密码：", hidden: true });
+  input.emit("data", Buffer.from("value\r"));
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.message, "读取禅道凭据失败");
+    assert.doesNotMatch(error.message, /unsafe restore failure/);
+    return true;
+  });
+  assert.deepEqual(rawModes, [true, false]);
+});
+
+test("readTtyLine restores an initially raw terminal to raw mode", async () => {
+  const { input, output, rawModes } = fakeTty();
+  input.isRaw = true;
+  const pending = readTtyLine({ input, output, prompt: "密码：", hidden: true });
+  input.emit("data", Buffer.from("value\r"));
+  assert.equal(await pending, "value");
+  assert.deepEqual(rawModes, [true, true]);
+  assert.equal(input.isRaw, true);
+});
+
+test("readTtyLine cleans up partial listener registration failures", async () => {
+  const { input, output } = fakeTty();
+  const addListener = input.on.bind(input);
+  input.on = (event, listener) => {
+    if (event === "error") throw new Error("unsafe listener failure");
+    return addListener(event, listener);
+  };
+  await assert.rejects(
+    readTtyLine({ input, output, prompt: "密码：", hidden: true }),
+    (error) => {
+      assert.equal(error.message, "读取禅道凭据失败");
+      assert.doesNotMatch(error.message, /unsafe listener failure/);
+      return true;
+    },
+  );
+  assert.equal(input.listenerCount("data"), 0);
+  assert.equal(input.isRaw, false);
 });
 
 function promptHarness(values) {
