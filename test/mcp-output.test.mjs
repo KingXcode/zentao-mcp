@@ -62,6 +62,27 @@ test("final MCP output redacts secrets from error content", () => {
   assert.match(result.content[0].text, /\[已隐藏\]/);
 });
 
+for (const { name, escaped, actual } of [
+  { name: "line feed", escaped: "\\n", actual: "\n" },
+  { name: "carriage return", escaped: "\\r", actual: "\r" },
+]) {
+  test(`error output remains secret-free after transport encodes ${name}`, () => {
+    const secret = `token${escaped}with${escaped}literals`;
+    const message = `token${actual}with${actual}literals`;
+    const client = makeClient({ password: secret });
+    const { fail } = createMcpOutput(
+      client.redactOutbound,
+      client.containsOutboundSecret,
+    );
+
+    const result = fail(new Error(message));
+
+    assert.equal(result.content[0].text.includes(secret), false);
+    assert.equal(JSON.stringify(result.content[0].text).includes(secret), false);
+    assert.equal(JSON.stringify(result).includes(secret), false);
+  });
+}
+
 test("final MCP output redacts secrets reconstructed by JSON string escaping", async () => {
   const password = "token\\nwith\\nliterals";
   const client = makeClient({

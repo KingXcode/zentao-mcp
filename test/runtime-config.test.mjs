@@ -72,3 +72,39 @@ test("loadRuntimeConfig preserves a legacy token that resembles an encoded envel
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+for (const { name, token } of [
+  { name: "missing envelope prefix", token: "plain-token" },
+  { name: "malformed envelope", token: "__ZENTAO_MCP_TOKEN_V1__x.YQ" },
+  { name: "length mismatch", token: "__ZENTAO_MCP_TOKEN_V1__2.YQ" },
+  { name: "invalid base64url", token: "__ZENTAO_MCP_TOKEN_V1__1.Y*" },
+  { name: "non-canonical base64url", token: "__ZENTAO_MCP_TOKEN_V1__1.YR" },
+  { name: "invalid UTF-8", token: "__ZENTAO_MCP_TOKEN_V1__1._w" },
+]) {
+  test(`loadRuntimeConfig rejects encoded token with ${name}`, async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "zentao-runtime-config-test-"));
+    const envPath = path.join(directory, ".env");
+    await writeFile(
+      envPath,
+      [
+        "ZENTAO_BASE_URL=https://zentao.test",
+        `ZENTAO_TOKEN="${token}"`,
+        "ZENTAO_TOKEN_ENCODING=base64url-v1",
+        "",
+      ].join("\n"),
+    );
+
+    try {
+      assert.throws(
+        () => loadRuntimeConfig(envPath),
+        (error) => {
+          assert.equal(error.message, "ZENTAO_TOKEN 编码配置无效");
+          assert.equal(error.message.includes(token), false);
+          return true;
+        },
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+}
