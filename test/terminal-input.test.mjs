@@ -183,6 +183,27 @@ test("readTtyLine cleans up partial listener registration failures", async () =>
   assert.equal(input.isRaw, false);
 });
 
+test("readTtyLine does not enter raw mode after a synchronous output stream error", async () => {
+  const { input, rawModes } = fakeTty();
+  const output = new EventEmitter();
+  output.isTTY = true;
+  output.write = () => {};
+  const addOutputListener = output.on.bind(output);
+  output.on = (event, listener) => {
+    addOutputListener(event, listener);
+    if (event === "error") listener(new Error("unsafe early stream failure"));
+    return output;
+  };
+
+  await assert.rejects(
+    readTtyLine({ input, output, prompt: "密码：", hidden: true }),
+    /读取禅道凭据失败/,
+  );
+  assert.deepEqual(rawModes, [false]);
+  assert.equal(input.isRaw, false);
+  assert.equal(input.listenerCount("data"), 0);
+});
+
 function promptHarness(values) {
   const calls = [];
   const writes = [];
