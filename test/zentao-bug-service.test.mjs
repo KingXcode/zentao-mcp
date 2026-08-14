@@ -2,10 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildBugWebUrl,
   collectBugImages,
   createZentaoBugService,
   detectImageMime,
 } from "../lib/zentao-bug-service.mjs";
+
+test("buildBugWebUrl preserves the Zentao deployment subpath", () => {
+  assert.equal(
+    buildBugWebUrl("https://zentao.test/zentao/", 22530),
+    "https://zentao.test/zentao/index.php?m=bug&f=view&bugID=22530",
+  );
+});
 
 test("listProjectBugs reads every page and filters accounts and actionable statuses", async () => {
   const calls = [];
@@ -60,6 +68,28 @@ test("listProjectBugs resolves the current account only when requested", async (
   });
   assert.deepEqual(paths, ["/user", "/projects/502/bugs"]);
   assert.deepEqual(result.bugs.map(({ id }) => id), [1]);
+});
+
+test("listProjectBugs leaves assignees unfiltered when no accounts are requested", async () => {
+  const service = createZentaoBugService({
+    baseUrl: "http://zentao.test",
+    client: {
+      get: async () => ({ total: 3, bugs: [
+        { id: 1, status: "active", assignedTo: "wangk" },
+        { id: 2, status: "confirmed", assignedTo: "czw" },
+        { id: 3, status: "closed", assignedTo: "someone" },
+      ] }),
+    },
+  });
+
+  const result = await service.listProjectBugs({
+    projectId: 502,
+    assigneeAccounts: [],
+    includeCurrentUser: false,
+    statuses: ["active", "confirmed"],
+  });
+
+  assert.deepEqual(result.bugs.map(({ id }) => id), [1, 2]);
 });
 
 test("listProjectBugs rejects a current-user profile without an account", async () => {
@@ -123,18 +153,58 @@ test("getBugDetail preserves the legacy string-user summaries", async () => {
 
 test("collectBugImages accepts object files and retains the first occurrence of a duplicate file", () => {
   const images = collectBugImages({
-    steps: '<img src="/file?fileID=10" alt="from steps">',
+    steps: '<img src="/index.php?m=file&f=read&fileID=10" alt="from steps">',
     files: {
       10: { id: 10, title: "duplicate.png", extension: "png" },
       11: { id: 11, title: "photo.webp", extension: "webp" },
       12: { id: 12, title: "document.pdf", extension: "pdf" },
     },
-    actions: [{ id: 8, comment: '<img src="/file?fileID=10" alt="from action">' }],
-  });
+    actions: [{ id: 8, comment: '<img src="/index.php?m=file&f=read&fileID=10" alt="from action">' }],
+  }, "http://zentao.test");
   assert.deepEqual(images.map(({ fileId, source, actionId, title }) => [fileId, source, actionId, title]), [
     [10, "steps", null, "from steps"],
     [11, "file", null, "photo.webp"],
   ]);
+});
+
+test("collectBugImages accepts only same-origin Zentao file-read routes", () => {
+  const images = collectBugImages({
+    steps: [
+      '<img src="/index.php?m=file&f=read&fileID=10">',
+      '<img src="http://zentao.test/index.php?m=file&f=read&fileID=11">',
+      '<img src="https://external.test/index.php?m=file&f=read&fileID=12">',
+      '<img src="/download?fileID=13">',
+      '<img src="/index.php?m=bug&f=view&fileID=14">',
+    ].join(""),
+  }, "http://zentao.test");
+
+  assert.deepEqual(images.map(({ fileId }) => fileId), [10, 11]);
+});
+
+test("getBugImage rejects external and unrelated image sources before binary access", async () => {
+  for (const src of [
+    "https://external.test/index.php?m=file&f=read&fileID=10",
+    "/download?fileID=10",
+  ]) {
+    let binaryCalled = false;
+    const service = createZentaoBugService({
+      baseUrl: "http://zentao.test",
+      client: {
+        get: async () => ({ id: 1, steps: `<img src="${src}">`, files: [], actions: [] }),
+        getBinary: async () => {
+          binaryCalled = true;
+          return {
+            bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+            contentType: "image/png",
+            contentDisposition: "",
+          };
+        },
+      },
+    });
+
+    await assert.rejects(service.getBugImage({ bugId: 1, fileId: 10 }), /图片不属于 Bug 1/);
+    assert.equal(binaryCalled, false);
+  }
 });
 
 test("getBugImage rejects a file that is not attached to the bug", async () => {
@@ -142,7 +212,7 @@ test("getBugImage rejects a file that is not attached to the bug", async () => {
   const service = createZentaoBugService({
     baseUrl: "http://zentao.test",
     client: {
-      get: async () => ({ id: 1, steps: '<img src="/file?fileID=10">', files: [], actions: [] }),
+      get: async () => ({ id: 1, steps: '<img src="/index.php?m=file&f=read&fileID=10">', files: [], actions: [] }),
       getBinary: async () => { binaryCalled = true; },
     },
   });
@@ -161,7 +231,7 @@ test("getBugImage validates PNG JPEG GIF and WebP signatures", async () => {
     const service = createZentaoBugService({
       baseUrl: "http://zentao.test",
       client: {
-        get: async () => ({ id: 1, steps: '<img src="/file?fileID=10">', files: [], actions: [] }),
+        get: async () => ({ id: 1, steps: '<img src="/index.php?m=file&f=read&fileID=10">', files: [], actions: [] }),
         getBinary: async () => ({ bytes: Uint8Array.from(sample.bytes), contentType: "application/octet-stream", contentDisposition: "" }),
       },
     });
@@ -173,7 +243,7 @@ test("getBugImage rejects unsupported image data and mismatched image media type
   const createService = (bytes, contentType) => createZentaoBugService({
     baseUrl: "http://zentao.test",
     client: {
-      get: async () => ({ id: 1, steps: '<img src="/file?fileID=10">', files: [], actions: [] }),
+      get: async () => ({ id: 1, steps: '<img src="/index.php?m=file&f=read&fileID=10">', files: [], actions: [] }),
       getBinary: async () => ({ bytes: Uint8Array.from(bytes), contentType, contentDisposition: "" }),
     },
   });
@@ -181,12 +251,45 @@ test("getBugImage rejects unsupported image data and mismatched image media type
   await assert.rejects(createService([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "image/jpeg").getBugImage({ bugId: 1, fileId: 10 }), /禅道 Bug 图片类型与内容不一致/);
 });
 
+test("getBugImage normalizes media type parameters and case before comparison", async () => {
+  const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  const createService = (contentType) => createZentaoBugService({
+    baseUrl: "http://zentao.test",
+    client: {
+      get: async () => ({
+        id: 1,
+        steps: '<img src="/index.php?m=file&f=read&fileID=10">',
+        files: [],
+        actions: [],
+      }),
+      getBinary: async () => ({
+        bytes: Uint8Array.from(png),
+        contentType,
+        contentDisposition: "",
+      }),
+    },
+  });
+
+  assert.equal(
+    (await createService("image/png; charset=binary").getBugImage({ bugId: 1, fileId: 10 })).mimeType,
+    "image/png",
+  );
+  assert.equal(
+    (await createService("IMAGE/PNG").getBugImage({ bugId: 1, fileId: 10 })).mimeType,
+    "image/png",
+  );
+  await assert.rejects(
+    createService("IMAGE/JPEG; charset=binary").getBugImage({ bugId: 1, fileId: 10 }),
+    /禅道 Bug 图片类型与内容不一致/,
+  );
+});
+
 test("getBugImage forwards the default five MiB binary limit", async () => {
   let maxBytes;
   const service = createZentaoBugService({
     baseUrl: "http://zentao.test",
     client: {
-      get: async () => ({ id: 1, steps: '<img src="/file?fileID=10">', files: [], actions: [] }),
+      get: async () => ({ id: 1, steps: '<img src="/index.php?m=file&f=read&fileID=10">', files: [], actions: [] }),
       getBinary: async (path, options) => {
         maxBytes = options.maxBytes;
         throw new Error(`文件超过 ${options.maxBytes} 字节限制`);

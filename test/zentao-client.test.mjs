@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { createServer } from "node:http";
 import test from "node:test";
 
 import { createZentaoClient } from "../lib/zentao-client.mjs";
@@ -21,6 +23,28 @@ function binaryResponse(bytes, {
   return new Response(Uint8Array.from(bytes), { status, headers });
 }
 
+function cancellableBinaryResponse({
+  status = 200,
+  contentLength,
+  bytes = [1],
+} = {}) {
+  let cancelled = false;
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(Uint8Array.from(bytes));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  const headers = new Headers({ "Content-Type": "application/octet-stream" });
+  if (contentLength !== undefined) headers.set("Content-Length", String(contentLength));
+  return {
+    response: new Response(body, { status, headers }),
+    wasCancelled: () => cancelled,
+  };
+}
+
 function makeClient(overrides = {}) {
   return createZentaoClient({
     baseUrl: "http://zentao.test",
@@ -31,6 +55,20 @@ function makeClient(overrides = {}) {
     timeoutMs: 1000,
     persistToken: async () => {},
     ...overrides,
+  });
+}
+
+async function listen(server) {
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  return `http://127.0.0.1:${server.address().port}`;
+}
+
+async function closeServer(server) {
+  if (!server.listening) return;
+  server.closeAllConnections();
+  await new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
   });
 }
 
@@ -49,11 +87,67 @@ test("getBinary uses the token and returns bounded binary metadata", async () =>
   assert.equal(calls[0].options.headers.Token, "valid-token");
 });
 
+test("getBinary rejects redirects before the Token header can cross origins", async (t) => {
+  let tokenAtRedirectTarget;
+  const target = createServer((request, response) => {
+    tokenAtRedirectTarget = request.headers.token;
+    response.writeHead(200, { "Content-Type": "image/png" });
+    response.end(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  });
+  const targetUrl = await listen(target);
+  const redirector = createServer((request, response) => {
+    response.writeHead(302, { Location: `${targetUrl}/image.png` });
+    response.end();
+  });
+  const redirectorUrl = await listen(redirector);
+  t.after(async () => {
+    await Promise.all([closeServer(redirector), closeServer(target)]);
+  });
+  const client = makeClient({ baseUrl: redirectorUrl, apiPrefix: "" });
+
+  await assert.rejects(client.getBinary("/redirect", { maxBytes: 8 }), /禅道文件读取失败：请求失败/);
+  assert.equal(tokenAtRedirectTarget, undefined);
+});
+
 test("getBinary rejects a declared or streamed body over the limit", async () => {
   const declared = makeClient({ fetchImpl: async () => binaryResponse([1], { contentLength: 9 }) });
   await assert.rejects(declared.getBinary("/files/1", { maxBytes: 8 }), /文件超过 8 字节限制/);
   const streamed = makeClient({ fetchImpl: async () => binaryResponse(new Array(9).fill(1)) });
   await assert.rejects(streamed.getBinary("/files/1", { maxBytes: 8 }), /文件超过 8 字节限制/);
+});
+
+test("getBinary cancels a declared oversized response body", async () => {
+  const tracked = cancellableBinaryResponse({ contentLength: 9 });
+  const client = makeClient({ fetchImpl: async () => tracked.response });
+
+  await assert.rejects(client.getBinary("/files/oversized", { maxBytes: 8 }), /文件超过 8 字节限制/);
+  assert.equal(tracked.wasCancelled(), true);
+});
+
+test("getBinary cancels an HTTP 401 response body before refreshing", async () => {
+  const unauthorized = cancellableBinaryResponse({ status: 401 });
+  let fileCalls = 0;
+  const client = makeClient({
+    fetchImpl: async (url) => {
+      if (String(url).endsWith("/tokens")) return jsonResponse({ token: "fresh-token" });
+      fileCalls += 1;
+      return fileCalls === 1
+        ? unauthorized.response
+        : binaryResponse([0xff, 0xd8, 0xff], { contentType: "image/jpeg" });
+    },
+  });
+
+  const result = await client.getBinary("/files/unauthorized", { maxBytes: 8 });
+  assert.equal(result.contentType, "image/jpeg");
+  assert.equal(unauthorized.wasCancelled(), true);
+});
+
+test("getBinary cancels other non-success response bodies", async () => {
+  const forbidden = cancellableBinaryResponse({ status: 403 });
+  const client = makeClient({ fetchImpl: async () => forbidden.response });
+
+  await assert.rejects(client.getBinary("/files/forbidden", { maxBytes: 8 }), /禅道文件读取失败：HTTP 403/);
+  assert.equal(forbidden.wasCancelled(), true);
 });
 
 test("getBinary refreshes once after HTTP 401", async () => {
