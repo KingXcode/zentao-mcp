@@ -225,19 +225,91 @@ test("a delayed old-token 401 waits for an in-flight newer refresh", async () =>
   assert.equal(loginCount, 2);
 });
 
-test("missing credentials fail without issuing a request", async () => {
+test("missing credentials open the wizard without issuing a request", async () => {
   let called = false;
+  let wizardCalls = 0;
   const client = makeClient({
     initialToken: "",
     account: "",
     password: "",
+    loadCredentials: () => ({ account: "", password: "" }),
+    onCredentialsRequired: async () => { wizardCalls += 1; },
     fetchImpl: async () => {
       called = true;
       return jsonResponse({});
     },
   });
-  await assert.rejects(client.get("/projects"), /ZENTAO_ACCOUNT.*ZENTAO_PASSWORD/);
+  await assert.rejects(client.get("/projects"), /已打开禅道凭据配置终端.*重新调用/);
   assert.equal(called, false);
+  assert.equal(wizardCalls, 1);
+});
+
+test("missing credentials reload from the provider on the next call", async () => {
+  let credentials = { account: "", password: "" };
+  let wizardCalls = 0;
+  const requests = [];
+  const client = makeClient({
+    initialToken: "",
+    account: "",
+    password: "",
+    loadCredentials: () => credentials,
+    onCredentialsRequired: async () => { wizardCalls += 1; },
+    fetchImpl: async (url, options) => {
+      requests.push({ url: String(url), options });
+      if (String(url).endsWith("/tokens")) return jsonResponse({ token: "fresh-token" });
+      return jsonResponse({ products: [] });
+    },
+  });
+
+  await assert.rejects(client.get("/products"), /已打开禅道凭据配置终端.*重新调用/);
+  credentials = { account: "dynamic-account", password: "dynamic-password" };
+  assert.deepEqual(await client.get("/products"), { products: [] });
+  assert.equal(wizardCalls, 1);
+  assert.deepEqual(JSON.parse(requests[0].options.body), credentials);
+  assert.equal(client.containsOutboundSecret("dynamic-account"), true);
+  assert.equal(client.containsOutboundSecret("dynamic-password"), true);
+  assert.doesNotMatch(client.redactOutbound("dynamic-account/dynamic-password"), /dynamic/);
+});
+
+test("concurrent missing-credential requests invoke the wizard once", async () => {
+  let wizardCalls = 0;
+  const client = makeClient({
+    initialToken: "",
+    account: "",
+    password: "",
+    loadCredentials: () => ({ account: "", password: "" }),
+    onCredentialsRequired: async () => {
+      wizardCalls += 1;
+      await new Promise((resolve) => setImmediate(resolve));
+    },
+    fetchImpl: async () => jsonResponse({}),
+  });
+
+  const results = await Promise.allSettled([
+    client.get("/projects"),
+    client.get("/products"),
+  ]);
+  assert.equal(results.every(({ status }) => status === "rejected"), true);
+  assert.equal(wizardCalls, 1);
+});
+
+test("a failed credential-wizard callback can be retried by the next call", async () => {
+  let wizardCalls = 0;
+  const client = makeClient({
+    initialToken: "",
+    account: "",
+    password: "",
+    loadCredentials: () => ({ account: "", password: "" }),
+    onCredentialsRequired: async () => {
+      wizardCalls += 1;
+      if (wizardCalls === 1) throw new Error("无法打开禅道凭据配置终端");
+    },
+    fetchImpl: async () => jsonResponse({}),
+  });
+
+  await assert.rejects(client.get("/projects"), /无法打开禅道凭据配置终端/);
+  await assert.rejects(client.get("/projects"), /已打开禅道凭据配置终端.*重新调用/);
+  assert.equal(wizardCalls, 2);
 });
 
 test("login errors do not expose credentials or returned tokens", async () => {
