@@ -155,6 +155,76 @@ test("concurrent 401 responses share one token refresh", async () => {
   assert.equal(persistenceCount, 1);
 });
 
+test("a delayed old-token 401 waits for an in-flight newer refresh", async () => {
+  const deferred = () => {
+    let resolve;
+    const promise = new Promise((promiseResolve) => {
+      resolve = promiseResolve;
+    });
+    return { promise, resolve };
+  };
+  const oldRequestStarted = deferred();
+  const releaseOldResponse = deferred();
+  const secondLoginStarted = deferred();
+  const releaseSecondLogin = deferred();
+  const oldRequestTokens = [];
+  let loginCount = 0;
+
+  const client = makeClient({
+    fetchImpl: async (url, options) => {
+      const requestUrl = String(url);
+      if (requestUrl.endsWith("/tokens")) {
+        loginCount += 1;
+        if (loginCount === 1) return jsonResponse({ token: "token-one" });
+        secondLoginStarted.resolve();
+        await releaseSecondLogin.promise;
+        return jsonResponse({ token: "token-two" });
+      }
+      if (requestUrl.endsWith("/old")) {
+        oldRequestTokens.push(options.headers.Token);
+        if (options.headers.Token === "valid-token") {
+          oldRequestStarted.resolve();
+          await releaseOldResponse.promise;
+          return jsonResponse({ message: "expired" }, 401);
+        }
+        return options.headers.Token === "token-two"
+          ? jsonResponse({ generation: 2 })
+          : jsonResponse({ message: "expired" }, 401);
+      }
+      if (requestUrl.endsWith("/advance")) {
+        return options.headers.Token === "valid-token"
+          ? jsonResponse({ message: "expired" }, 401)
+          : jsonResponse({ generation: 1 });
+      }
+      if (requestUrl.endsWith("/refresh")) {
+        return options.headers.Token === "token-one"
+          ? jsonResponse({ message: "expired" }, 401)
+          : jsonResponse({ generation: 2 });
+      }
+      throw new Error("unexpected test URL");
+    },
+  });
+
+  const oldOutcomePromise = client.get("/old").then(
+    (value) => ({ value }),
+    (error) => ({ error }),
+  );
+  await oldRequestStarted.promise;
+  assert.deepEqual(await client.get("/advance"), { generation: 1 });
+  const refreshPromise = client.get("/refresh");
+  await secondLoginStarted.promise;
+  releaseOldResponse.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseSecondLogin.resolve();
+
+  const [oldOutcome, refreshResult] = await Promise.all([oldOutcomePromise, refreshPromise]);
+  assert.equal(oldOutcome.error, undefined);
+  assert.deepEqual(oldOutcome.value, { generation: 2 });
+  assert.deepEqual(refreshResult, { generation: 2 });
+  assert.deepEqual(oldRequestTokens, ["valid-token", "token-two"]);
+  assert.equal(loginCount, 2);
+});
+
 test("missing credentials fail without issuing a request", async () => {
   let called = false;
   const client = makeClient({
@@ -211,8 +281,8 @@ test("a persistence failure does not update the in-memory token", async () => {
       return jsonResponse({ token: `token-${loginCount}` });
     },
   });
-  await assert.rejects(client.get("/projects"), /disk full/);
-  await assert.rejects(client.get("/projects"), /disk full/);
+  await assert.rejects(client.get("/projects"), /禅道 Token 持久化失败/);
+  await assert.rejects(client.get("/projects"), /禅道 Token 持久化失败/);
   assert.equal(loginCount, 2);
 });
 
@@ -280,7 +350,7 @@ test("persistence errors do not expose the fresh token", async () => {
     fetchImpl: async () => jsonResponse({ token: "fresh-token" }),
   });
   const error = await client.get("/projects").catch((value) => value);
-  assert.match(error.message, /disk full/);
+  assert.equal(error.message, "禅道 Token 持久化失败");
   assert.doesNotMatch(error.message, /fresh-token/);
 });
 
@@ -291,8 +361,271 @@ test("GET transport errors do not expose the request token", async () => {
     },
   });
   const error = await client.get("/projects").catch((value) => value);
-  assert.match(error.message, /network failure/);
+  assert.equal(error.message, "禅道 API 请求失败：请求失败");
   assert.doesNotMatch(error.message, /valid-token/);
+});
+
+test("GET body read errors use a fixed safe message", async () => {
+  const client = makeClient({
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      text: async () => {
+        throw new Error("body failed for valid-token and secret-password");
+      },
+    }),
+  });
+  const error = await client.get("/projects").catch((value) => value);
+  assert.equal(error.message, "禅道 API 响应读取失败");
+  assert.doesNotMatch(error.message, /valid-token|secret-password/);
+});
+
+test("an arbitrary body error with status 401 does not trigger login", async () => {
+  let loginCount = 0;
+  const client = makeClient({
+    fetchImpl: async (url) => {
+      if (String(url).endsWith("/tokens")) {
+        loginCount += 1;
+        return jsonResponse({ token: "fresh-token" });
+      }
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () => {
+          throw Object.assign(new Error("not an HTTP response error"), { status: 401 });
+        },
+      };
+    },
+  });
+  await assert.rejects(client.get("/projects"), /禅道 API 响应读取失败/);
+  assert.equal(loginCount, 0);
+});
+
+test("an HTTP 401 body read failure refreshes and retries once", async () => {
+  let loginCount = 0;
+  let getCount = 0;
+  const client = makeClient({
+    fetchImpl: async (url) => {
+      if (String(url).endsWith("/tokens")) {
+        loginCount += 1;
+        return jsonResponse({ token: "fresh-token" });
+      }
+      getCount += 1;
+      if (getCount === 1) {
+        return {
+          ok: false,
+          status: 401,
+          statusText: "Unauthorized",
+          text: async () => {
+            throw new Error("body failed for valid-token");
+          },
+        };
+      }
+      return jsonResponse({ ok: true });
+    },
+  });
+
+  assert.deepEqual(await client.get("/projects"), { ok: true });
+  assert.equal(loginCount, 1);
+  assert.equal(getCount, 2);
+});
+
+test("successful GET results recursively redact known authentication values", async () => {
+  const client = makeClient({
+    fetchImpl: async () =>
+      jsonResponse({
+        direct: "valid-token",
+        nested: {
+          account: "robot",
+          password: "prefix secret-password suffix",
+        },
+        array: ["valid-token", { value: "secret-password" }],
+        "key-valid-token": "visible",
+        safe: 42,
+      }),
+  });
+
+  const result = await client.get("/projects");
+  assert.doesNotMatch(JSON.stringify(result), /valid-token|robot|secret-password/);
+  assert.equal(result.safe, 42);
+  assert.equal(result["key-[已隐藏]"], "visible");
+});
+
+test("successful GET results redact a freshly logged-in token", async () => {
+  const client = makeClient({
+    initialToken: "",
+    fetchImpl: async (url) =>
+      String(url).endsWith("/tokens")
+        ? jsonResponse({ token: "fresh-token" })
+        : jsonResponse({ nested: [{ credential: "fresh-token" }], safe: true }),
+  });
+
+  const result = await client.get("/projects");
+  assert.doesNotMatch(JSON.stringify(result), /fresh-token/);
+  assert.equal(result.safe, true);
+});
+
+test("bottom-layer failures use fixed messages for encoded credentials", async (t) => {
+  const password = 'sensitive"password\\part';
+  const token = 'sensitive"token\\part';
+
+  await t.test("login transport", async () => {
+    const encodedPassword = JSON.stringify(password).slice(1, -1);
+    const client = makeClient({
+      initialToken: "",
+      password,
+      fetchImpl: async () => {
+        throw new Error(`network failure for ${encodedPassword}`);
+      },
+    });
+    const error = await client.get("/projects").catch((value) => value);
+    assert.equal(error.message, "禅道自动登录失败：请求失败");
+    assert.equal(error.message.includes(encodedPassword), false);
+  });
+
+  await t.test("persistence", async () => {
+    const encodedToken = encodeURIComponent(token);
+    const client = makeClient({
+      initialToken: "",
+      persistToken: async () => {
+        throw new Error(`disk failure for ${encodedToken}`);
+      },
+      fetchImpl: async () => jsonResponse({ token }),
+    });
+    const error = await client.get("/projects").catch((value) => value);
+    assert.equal(error.message, "禅道 Token 持久化失败");
+    assert.equal(error.message.includes(encodedToken), false);
+  });
+
+  await t.test("GET transport", async () => {
+    const encodedToken = JSON.stringify(token).slice(1, -1);
+    const client = makeClient({
+      initialToken: token,
+      fetchImpl: async () => {
+        throw new Error(`network failure for ${encodedToken}`);
+      },
+    });
+    const error = await client.get("/projects").catch((value) => value);
+    assert.equal(error.message, "禅道 API 请求失败：请求失败");
+    assert.equal(error.message.includes(encodedToken), false);
+  });
+});
+
+test("API errors redact URL-encoded authentication values", async () => {
+  const token = 'sensitive"token\\part';
+  const encodedToken = encodeURIComponent(token);
+  const client = makeClient({
+    initialToken: token,
+    fetchImpl: async () =>
+      jsonResponse({ message: `rejected ${encodedToken}` }, 403),
+  });
+  const error = await client.get("/projects").catch((value) => value);
+  assert.match(error.message, /HTTP 403/);
+  assert.equal(error.message.includes(encodedToken), false);
+});
+
+test("API errors redact tokens from earlier refresh generations", async () => {
+  let loginCount = 0;
+  const pathAttempts = new Map();
+  const client = makeClient({
+    fetchImpl: async (url) => {
+      const requestUrl = String(url);
+      if (requestUrl.endsWith("/tokens")) {
+        loginCount += 1;
+        return jsonResponse({ token: `token-${loginCount}` });
+      }
+      if (requestUrl.endsWith("/error")) {
+        return jsonResponse({ message: "rejected token-1" }, 403);
+      }
+      const attempts = (pathAttempts.get(requestUrl) || 0) + 1;
+      pathAttempts.set(requestUrl, attempts);
+      return attempts === 1
+        ? jsonResponse({ message: "expired" }, 401)
+        : jsonResponse({ ok: true });
+    },
+  });
+
+  await client.get("/first-refresh");
+  await client.get("/second-refresh");
+  const error = await client.get("/error").catch((value) => value);
+  assert.match(error.message, /HTTP 403/);
+  assert.doesNotMatch(error.message, /token-1/);
+});
+
+test("successful GET results redact encoded authentication values", async () => {
+  const password = 'sensitive"password\\part';
+  const token = 'sensitive"token\\part';
+  const jsonEncodedPassword = JSON.stringify(password).slice(1, -1);
+  const urlEncodedToken = encodeURIComponent(token);
+  const client = makeClient({
+    initialToken: token,
+    password,
+    fetchImpl: async () =>
+      jsonResponse({ nested: [jsonEncodedPassword, { token: urlEncodedToken }], safe: true }),
+  });
+
+  const result = await client.get("/projects");
+  assert.equal(result.nested[0], "[已隐藏]");
+  assert.equal(result.nested[1].token, "[已隐藏]");
+  assert.equal(JSON.stringify(result).includes(jsonEncodedPassword), false);
+  assert.equal(JSON.stringify(result).includes(urlEncodedToken), false);
+  assert.equal(result.safe, true);
+});
+
+test("GET timeout covers reading the response body", async () => {
+  let bodyStarted = false;
+  const client = makeClient({
+    timeoutMs: 0,
+    fetchImpl: async (_url, options) => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      text: async () => {
+        bodyStarted = true;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (options.signal.aborted) {
+          throw new Error("body timeout for valid-token");
+        }
+        return JSON.stringify({ ok: true });
+      },
+    }),
+  });
+
+  await assert.rejects(client.get("/projects"), {
+    message: "禅道 API 请求失败：请求超时",
+  });
+  assert.equal(bodyStarted, true);
+});
+
+test("login timeout covers reading the response body", async () => {
+  let loginBodyStarted = false;
+  const client = makeClient({
+    initialToken: "",
+    timeoutMs: 0,
+    fetchImpl: async (url, options) => {
+      if (!String(url).endsWith("/tokens")) return jsonResponse({ ok: true });
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () => {
+          loginBodyStarted = true;
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          if (options.signal.aborted) {
+            throw new Error("body timeout for secret-password");
+          }
+          return JSON.stringify({ token: "fresh-token" });
+        },
+      };
+    },
+  });
+
+  await assert.rejects(client.get("/projects"), {
+    message: "禅道自动登录失败：请求超时",
+  });
+  assert.equal(loginBodyStarted, true);
 });
 
 test("redaction does not leave suffixes from overlapping credentials", async () => {
