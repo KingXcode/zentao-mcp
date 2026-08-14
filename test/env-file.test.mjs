@@ -31,6 +31,16 @@ test("updateEnvToken replaces the token and preserves unrelated content", async 
   );
 });
 
+test("updateEnvToken preserves blank lines and indentation before a token", async () => {
+  await withEnvFile("A=1\n\n\tZENTAO_TOKEN = old\nB=2\n", async (envPath) => {
+    await updateEnvToken(envPath, "new-token");
+    assert.equal(
+      await readFile(envPath, "utf8"),
+      'A=1\n\n\tZENTAO_TOKEN="new-token"\nB=2\n',
+    );
+  });
+});
+
 test("updateEnvToken appends a missing token", async () => {
   await withEnvFile("ZENTAO_BASE_URL=http://zentao", async (envPath) => {
     await updateEnvToken(envPath, "new-token");
