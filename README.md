@@ -17,7 +17,7 @@ cd /path/to/zentao-mcp
 npm install
 cp .env.example .env
 chmod 600 .env
-chmod +x start.sh
+chmod +x start.sh stop.sh
 ```
 
 只需确认项目目录 `.env` 中的服务器地址正确；MCP 进程不会读取其他路径的环境文件。首次配置可将 Token、账号和密码全部留空：
@@ -67,7 +67,24 @@ codex mcp remove zentao
 
 然后重新执行添加命令。
 
-## 3. 使用示例
+## 3. 手动停止与重启
+
+停止本项目全部 MCP 实例：
+
+```bash
+./stop.sh
+```
+
+重启：
+
+```bash
+./stop.sh
+./start.sh
+```
+
+`stop.sh` 只向本项目的 `server.mjs` 进程发送 `TERM`；没有运行实例时可安全重复执行。
+
+## 4. 使用示例
 
 重新打开一个 Codex 任务，输入：
 
@@ -89,7 +106,7 @@ codex mcp remove zentao
 查询禅道迭代 258 中尚未完成的任务，按负责人汇总剩余工作量。
 ```
 
-## 4. 常见问题
+## 5. 常见问题
 
 ### 没有自动打开凭据配置终端
 
