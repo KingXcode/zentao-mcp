@@ -72,6 +72,26 @@ test("getBinary refreshes once after HTTP 401", async () => {
   assert.equal(result.contentType, "image/jpeg");
 });
 
+test("getBinary redacts credentials and token generations in response headers", async () => {
+  const client = makeClient({
+    fetchImpl: async (url, options) => {
+      if (String(url).endsWith("/tokens")) return jsonResponse({ token: "fresh-token" });
+      return options.headers.Token === "valid-token"
+        ? binaryResponse([], { status: 401 })
+        : binaryResponse([1], {
+          contentType: "image/png; old=valid-token; current=fresh-token; account=robot",
+          contentDisposition: 'attachment; filename="secret-password-fresh-token.png"',
+        });
+    },
+  });
+
+  const result = await client.getBinary("/files/headers");
+  assert.doesNotMatch(result.contentType, /valid-token|fresh-token|robot/);
+  assert.doesNotMatch(result.contentDisposition, /secret-password|fresh-token/);
+  assert.match(result.contentType, /\[已隐藏\]/);
+  assert.match(result.contentDisposition, /\[已隐藏\]/);
+});
+
 test("getBinary failures use fixed messages without response secrets", async () => {
   const client = makeClient({
     fetchImpl: async () => new Response("valid-token secret-password", { status: 500 }),
