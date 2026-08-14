@@ -6,6 +6,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 import { updateEnvToken } from "./lib/env-file.mjs";
+import { createMcpOutput, plainText } from "./lib/mcp-output.mjs";
 import { loadRuntimeConfig } from "./lib/runtime-config.mjs";
 import { createZentaoClient } from "./lib/zentao-client.mjs";
 
@@ -19,19 +20,10 @@ const client = createZentaoClient({
 });
 
 const zentaoGet = (path, query) => client.get(path, query);
-
-function ok(value) {
-  return {
-    content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
-  };
-}
-
-function fail(error) {
-  return {
-    content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
-    isError: true,
-  };
-}
+const { ok, fail } = createMcpOutput(
+  client.redactOutbound,
+  client.containsOutboundSecret,
+);
 
 function accountOf(user) {
   if (!user) return "";
@@ -45,20 +37,6 @@ function userSummary(user) {
     account: user.account || "",
     realname: user.realname || user.name || "",
   };
-}
-
-function plainText(value) {
-  if (value === undefined || value === null) return "";
-  return String(value)
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&amp;/gi, "&")
-    .replace(/&quot;/gi, '"')
-    .trim();
 }
 
 async function getAllProductBugs(productId) {

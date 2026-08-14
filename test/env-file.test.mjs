@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { updateEnvToken } from "../lib/env-file.mjs";
+import { loadRuntimeConfig } from "../lib/runtime-config.mjs";
 
 async function withEnvFile(content, run) {
   const directory = await mkdtemp(path.join(tmpdir(), "zentao-env-test-"));
@@ -25,7 +26,7 @@ test("updateEnvToken replaces the token and preserves unrelated content", async 
       const content = await readFile(envPath, "utf8");
       assert.equal(
         content,
-        '# local config\nZENTAO_BASE_URL=http://zentao\nZENTAO_TOKEN="new-token"\nZENTAO_TIMEOUT_MS=15000\n',
+        '# local config\nZENTAO_BASE_URL=http://zentao\nZENTAO_TOKEN="__ZENTAO_MCP_TOKEN_V1__9.bmV3LXRva2Vu"\nZENTAO_TIMEOUT_MS=15000\nZENTAO_TOKEN_ENCODING=base64url-v1\n',
       );
     },
   );
@@ -36,7 +37,7 @@ test("updateEnvToken preserves blank lines and indentation before a token", asyn
     await updateEnvToken(envPath, "new-token");
     assert.equal(
       await readFile(envPath, "utf8"),
-      'A=1\n\n\tZENTAO_TOKEN="new-token"\nB=2\n',
+      'A=1\n\n\tZENTAO_TOKEN="__ZENTAO_MCP_TOKEN_V1__9.bmV3LXRva2Vu"\nB=2\nZENTAO_TOKEN_ENCODING=base64url-v1\n',
     );
   });
 });
@@ -46,22 +47,31 @@ test("updateEnvToken appends a missing token", async () => {
     await updateEnvToken(envPath, "new-token");
     assert.equal(
       await readFile(envPath, "utf8"),
-      'ZENTAO_BASE_URL=http://zentao\nZENTAO_TOKEN="new-token"\n',
+      'ZENTAO_BASE_URL=http://zentao\nZENTAO_TOKEN="__ZENTAO_MCP_TOKEN_V1__9.bmV3LXRva2Vu"\nZENTAO_TOKEN_ENCODING=base64url-v1\n',
     );
   });
 });
 
 test("updateEnvToken safely quotes special characters", async () => {
   await withEnvFile("ZENTAO_TOKEN=old\n", async (envPath) => {
-    await updateEnvToken(envPath, 'a\\b"c\nd\re');
-    assert.equal(await readFile(envPath, "utf8"), 'ZENTAO_TOKEN="a\\\\b\\"c\\nd\\re"\n');
+    const token = 'a\\b"c\nd\re';
+    await updateEnvToken(envPath, token);
+    const content = await readFile(envPath, "utf8");
+    assert.match(
+      content,
+      /^ZENTAO_TOKEN="__ZENTAO_MCP_TOKEN_V1__\d+\.[A-Za-z0-9_-]+"\nZENTAO_TOKEN_ENCODING=base64url-v1\n$/,
+    );
+    assert.equal(content.includes(token), false);
   });
 });
 
 test("updateEnvToken preserves CRLF line endings", async () => {
   await withEnvFile("A=1\r\nZENTAO_TOKEN=old\r\nB=2\r\n", async (envPath) => {
     await updateEnvToken(envPath, "new");
-    assert.equal(await readFile(envPath, "utf8"), 'A=1\r\nZENTAO_TOKEN="new"\r\nB=2\r\n');
+    assert.equal(
+      await readFile(envPath, "utf8"),
+      'A=1\r\nZENTAO_TOKEN="__ZENTAO_MCP_TOKEN_V1__3.bmV3"\r\nB=2\r\nZENTAO_TOKEN_ENCODING=base64url-v1\r\n',
+    );
   });
 });
 
@@ -70,4 +80,28 @@ test("updateEnvToken leaves the env file readable only by its owner", async () =
     await updateEnvToken(envPath, "new");
     assert.equal((await stat(envPath)).mode & 0o777, 0o600);
   });
+});
+
+test("updateEnvToken round-trips every supported token character through runtime config", async (t) => {
+  const cases = [
+    ["backslash", "token\\with\\slashes"],
+    ["double quote", 'token"with"quotes'],
+    ["literal backslash-n", "token\\nwith\\nliterals"],
+    ["line feed", "token\nwith\nlines"],
+    ["carriage return", "token\rwith\rreturns"],
+  ];
+
+  for (const [name, token] of cases) {
+    await t.test(name, async () => {
+      await withEnvFile(
+        "ZENTAO_BASE_URL=http://zentao.test\nZENTAO_TOKEN=old\n",
+        async (envPath) => {
+          await updateEnvToken(envPath, token);
+
+          assert.equal(loadRuntimeConfig(envPath).initialToken, token);
+          assert.equal((await stat(envPath)).mode & 0o777, 0o600);
+        },
+      );
+    });
+  }
 });

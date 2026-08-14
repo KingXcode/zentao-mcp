@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test",
-    "check": "node --check server.mjs && node --check lib/env-file.mjs && node --check lib/zentao-client.mjs && node --check lib/runtime-config.mjs"
+    "check": "node --check server.mjs && node --check lib/atomic-file.mjs && node --check lib/env-file.mjs && node --check lib/mcp-output.mjs && node --check lib/runtime-config.mjs && node --check lib/token-env-codec.mjs && node --check lib/zentao-client.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

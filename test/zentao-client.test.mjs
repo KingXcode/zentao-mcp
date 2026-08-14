@@ -432,7 +432,7 @@ test("an HTTP 401 body read failure refreshes and retries once", async () => {
   assert.equal(getCount, 2);
 });
 
-test("successful GET results recursively redact known authentication values", async () => {
+test("successful GET results preserve authentication-shaped data for business mapping", async () => {
   const client = makeClient({
     fetchImpl: async () =>
       jsonResponse({
@@ -448,12 +448,19 @@ test("successful GET results recursively redact known authentication values", as
   });
 
   const result = await client.get("/projects");
-  assert.doesNotMatch(JSON.stringify(result), /valid-token|robot|secret-password/);
-  assert.equal(result.safe, 42);
-  assert.equal(result["key-[已隐藏]"], "visible");
+  assert.deepEqual(result, {
+    direct: "valid-token",
+    nested: {
+      account: "robot",
+      password: "prefix secret-password suffix",
+    },
+    array: ["valid-token", { value: "secret-password" }],
+    "key-valid-token": "visible",
+    safe: 42,
+  });
 });
 
-test("successful GET results redact a freshly logged-in token", async () => {
+test("successful GET results preserve a freshly logged-in token for business mapping", async () => {
   const client = makeClient({
     initialToken: "",
     fetchImpl: async (url) =>
@@ -463,8 +470,10 @@ test("successful GET results redact a freshly logged-in token", async () => {
   });
 
   const result = await client.get("/projects");
-  assert.doesNotMatch(JSON.stringify(result), /fresh-token/);
-  assert.equal(result.safe, true);
+  assert.deepEqual(result, {
+    nested: [{ credential: "fresh-token" }],
+    safe: true,
+  });
 });
 
 test("bottom-layer failures use fixed messages for encoded credentials", async (t) => {
@@ -540,7 +549,7 @@ test("API errors redact mixed-case percent escapes independently", async () => {
   assert.equal(error.message.includes(mixedCaseEncoding), false);
 });
 
-test("successful GET results redact mixed-case percent escapes independently", async () => {
+test("successful GET results preserve mixed-case percent escapes for business mapping", async () => {
   const token = "x}\\y";
   const mixedCaseEncoding = "x%7d%5Cy";
   const client = makeClient({
@@ -554,7 +563,7 @@ test("successful GET results redact mixed-case percent escapes independently", a
   });
 
   const result = await client.get("/projects");
-  assert.equal(result.credential, "[已隐藏]");
+  assert.equal(result.credential, mixedCaseEncoding);
   assert.equal(result.unrelated, "X%7d%5CY");
   assert.equal(result.safe, true);
 });
@@ -575,7 +584,7 @@ test("API errors redact application/x-www-form-urlencoded authentication values"
   assert.equal(error.message.includes(formEncoding), false);
 });
 
-test("successful GET results redact application/x-www-form-urlencoded values", async () => {
+test("successful GET results preserve form-encoded values for business mapping", async () => {
   const token = "x y+z}";
   const formEncoding = "x+y%2Bz%7D";
   const client = makeClient({
@@ -584,7 +593,7 @@ test("successful GET results redact application/x-www-form-urlencoded values", a
   });
 
   const result = await client.get("/projects");
-  assert.equal(result.credential, "[已隐藏]");
+  assert.equal(result.credential, formEncoding);
   assert.equal(result.safe, true);
 });
 
@@ -616,7 +625,7 @@ test("API errors redact tokens from earlier refresh generations", async () => {
   assert.doesNotMatch(error.message, /token-1/);
 });
 
-test("successful GET results redact encoded authentication values", async () => {
+test("successful GET results preserve encoded authentication values for business mapping", async () => {
   const password = 'sensitive"password\\part';
   const token = 'sensitive"token\\part';
   const jsonEncodedPassword = JSON.stringify(password).slice(1, -1);
@@ -629,10 +638,8 @@ test("successful GET results redact encoded authentication values", async () => 
   });
 
   const result = await client.get("/projects");
-  assert.equal(result.nested[0], "[已隐藏]");
-  assert.equal(result.nested[1].token, "[已隐藏]");
-  assert.equal(JSON.stringify(result).includes(jsonEncodedPassword), false);
-  assert.equal(JSON.stringify(result).includes(urlEncodedToken), false);
+  assert.equal(result.nested[0], jsonEncodedPassword);
+  assert.equal(result.nested[1].token, urlEncodedToken);
   assert.equal(result.safe, true);
 });
 
@@ -702,3 +709,19 @@ test("redaction does not leave suffixes from overlapping credentials", async () 
   const error = await client.get("/projects").catch((value) => value);
   assert.doesNotMatch(error.message, /robot|secret/);
 });
+
+for (const account of ["data", "status"]) {
+  test(`successful GET data preserves standard response keys when account is ${account}`, async () => {
+    const responseBody = {
+      status: "success",
+      data: [{ id: 1, name: "visible" }],
+      echoedAccount: account,
+    };
+    const client = makeClient({
+      account,
+      fetchImpl: async () => jsonResponse(responseBody),
+    });
+
+    assert.deepEqual(await client.get("/projects"), responseBody);
+  });
+}
