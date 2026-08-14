@@ -526,6 +526,68 @@ test("API errors redact URL-encoded authentication values", async () => {
   assert.equal(error.message.includes(encodedToken), false);
 });
 
+test("API errors redact mixed-case percent escapes independently", async () => {
+  const token = "x}\\y";
+  const mixedCaseEncoding = "x%7d%5Cy";
+  const client = makeClient({
+    initialToken: token,
+    fetchImpl: async () =>
+      jsonResponse({ message: `rejected ${mixedCaseEncoding}` }, 403),
+  });
+
+  const error = await client.get("/projects").catch((value) => value);
+  assert.match(error.message, /HTTP 403/);
+  assert.equal(error.message.includes(mixedCaseEncoding), false);
+});
+
+test("successful GET results redact mixed-case percent escapes independently", async () => {
+  const token = "x}\\y";
+  const mixedCaseEncoding = "x%7d%5Cy";
+  const client = makeClient({
+    initialToken: token,
+    fetchImpl: async () =>
+      jsonResponse({
+        credential: mixedCaseEncoding,
+        unrelated: "X%7d%5CY",
+        safe: true,
+      }),
+  });
+
+  const result = await client.get("/projects");
+  assert.equal(result.credential, "[已隐藏]");
+  assert.equal(result.unrelated, "X%7d%5CY");
+  assert.equal(result.safe, true);
+});
+
+test("API errors redact application/x-www-form-urlencoded authentication values", async () => {
+  const token = "x y+z}";
+  const formEncoding = new URLSearchParams([["value", token]])
+    .toString()
+    .slice("value=".length);
+  assert.equal(formEncoding, "x+y%2Bz%7D");
+  const client = makeClient({
+    initialToken: token,
+    fetchImpl: async () => jsonResponse({ message: `rejected ${formEncoding}` }, 403),
+  });
+
+  const error = await client.get("/projects").catch((value) => value);
+  assert.match(error.message, /HTTP 403/);
+  assert.equal(error.message.includes(formEncoding), false);
+});
+
+test("successful GET results redact application/x-www-form-urlencoded values", async () => {
+  const token = "x y+z}";
+  const formEncoding = "x+y%2Bz%7D";
+  const client = makeClient({
+    initialToken: token,
+    fetchImpl: async () => jsonResponse({ credential: formEncoding, safe: true }),
+  });
+
+  const result = await client.get("/projects");
+  assert.equal(result.credential, "[已隐藏]");
+  assert.equal(result.safe, true);
+});
+
 test("API errors redact tokens from earlier refresh generations", async () => {
   let loginCount = 0;
   const pathAttempts = new Map();
