@@ -47,7 +47,7 @@
 - 安装：`/Users/nsy/.codex/skills/handling-ruifeng-flutter-pc-bugs/`
 - 记录：`.superpowers/sdd/2026-08-14-ruifeng-bug-skill/skill-evaluation.md`（被仓库忽略，仅保留本机评估证据）
 
-### 任务 1：为认证客户端增加受限二进制 GET
+### Task 1：为认证客户端增加受限二进制 GET
 
 **文件：**
 - 修改：`lib/zentao-client.mjs`
@@ -221,7 +221,7 @@ git add -- lib/zentao-client.mjs lib/runtime-client.mjs test/zentao-client.test.
 git commit -m "feat: add authenticated Zentao binary reads"
 ```
 
-### 任务 2：实现项目 Bug、链接、详情和图片服务
+### Task 2：实现项目 Bug、链接、详情和图片服务
 
 **文件：**
 - 创建：`lib/zentao-bug-service.mjs`
@@ -447,7 +447,7 @@ git add -- lib/zentao-bug-service.mjs test/zentao-bug-service.test.mjs
 git commit -m "feat: add Zentao project bug service"
 ```
 
-### 任务 3：注册 MCP 工具并保持最终出站安全
+### Task 3：注册 MCP 工具并保持最终出站安全
 
 **文件：**
 - 修改：`lib/mcp-output.mjs`
@@ -586,7 +586,7 @@ git add -- lib/mcp-output.mjs server.mjs test/mcp-output.test.mjs package.json R
 git commit -m "feat: expose project bug images through MCP"
 ```
 
-### 任务 4：在没有 Skill 时建立行为基线
+### Task 4：在没有 Skill 时建立行为基线
 
 **必需子 Skill：**使用 `skill-creator` 和 `superpowers-zh-writing-skills`；遵守其先观察无 Skill 失败、再编写 Skill 的 RED/GREEN 顺序。
 
@@ -637,7 +637,7 @@ git commit -m "feat: expose project bug images through MCP"
 
 只有观察到至少一种真实失败后才能编写 Skill；如果五次全部符合规格，重新设计更有区分度的场景，不能跳过 RED。
 
-### 任务 5：创建、验证并安装个人 Skill
+### Task 5：创建、验证并安装个人 Skill
 
 **文件：**
 - 创建：`/private/tmp/ruifeng-flutter-pc-skill-build/handling-ruifeng-flutter-pc-bugs/SKILL.md`
@@ -788,7 +788,7 @@ diff -r \
 
 预期：`diff` 退出 0。不要删除暂存目录，直到最终验收完成。
 
-### 任务 6：最终验证、独立审查与交付
+### Task 6：最终验证、独立审查与交付
 
 **文件：**
 - 检查：所有本次项目改动
