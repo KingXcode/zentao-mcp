@@ -16,6 +16,19 @@ function jsonResponse(body, status = 200) {
   });
 }
 
+test("runtime client exposes its configured base URL", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "zentao-runtime-base-url-test-"));
+  const envPath = path.join(directory, ".env");
+  try {
+    await writeFile(envPath, "ZENTAO_BASE_URL=https://zentao.test/\nZENTAO_TOKEN=token\n");
+    const client = createRuntimeClient({ envPath, launcherPath: "/fixed.command" });
+    assert.equal(client.baseUrl, "https://zentao.test/");
+    assert.equal(typeof client.getBinary, "function");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("runtime client reloads credentials after the terminal wizard saves them", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "zentao-runtime-client-test-"));
   const envPath = path.join(directory, ".env");

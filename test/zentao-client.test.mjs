@@ -10,6 +10,17 @@ function jsonResponse(body, status = 200) {
   });
 }
 
+function binaryResponse(bytes, {
+  status = 200,
+  contentType = "image/png",
+  contentDisposition = 'attachment; filename="image.png"',
+  contentLength,
+} = {}) {
+  const headers = new Headers({ "Content-Type": contentType, "Content-Disposition": contentDisposition });
+  if (contentLength !== undefined) headers.set("Content-Length", String(contentLength));
+  return new Response(Uint8Array.from(bytes), { status, headers });
+}
+
 function makeClient(overrides = {}) {
   return createZentaoClient({
     baseUrl: "http://zentao.test",
@@ -22,6 +33,53 @@ function makeClient(overrides = {}) {
     ...overrides,
   });
 }
+
+test("getBinary uses the token and returns bounded binary metadata", async () => {
+  const calls = [];
+  const client = makeClient({
+    fetchImpl: async (url, options) => {
+      calls.push({ url: String(url), options });
+      return binaryResponse([0x89, 0x50, 0x4e, 0x47]);
+    },
+  });
+  const result = await client.getBinary("/files/41187", { maxBytes: 8 });
+  assert.deepEqual([...result.bytes], [0x89, 0x50, 0x4e, 0x47]);
+  assert.equal(result.contentType, "image/png");
+  assert.equal(result.contentDisposition, 'attachment; filename="image.png"');
+  assert.equal(calls[0].options.headers.Token, "valid-token");
+});
+
+test("getBinary rejects a declared or streamed body over the limit", async () => {
+  const declared = makeClient({ fetchImpl: async () => binaryResponse([1], { contentLength: 9 }) });
+  await assert.rejects(declared.getBinary("/files/1", { maxBytes: 8 }), /文件超过 8 字节限制/);
+  const streamed = makeClient({ fetchImpl: async () => binaryResponse(new Array(9).fill(1)) });
+  await assert.rejects(streamed.getBinary("/files/1", { maxBytes: 8 }), /文件超过 8 字节限制/);
+});
+
+test("getBinary refreshes once after HTTP 401", async () => {
+  const tokens = [];
+  const client = makeClient({
+    fetchImpl: async (url, options) => {
+      if (String(url).endsWith("/tokens")) return jsonResponse({ token: "fresh-token" });
+      tokens.push(options.headers.Token);
+      return tokens.length === 1
+        ? binaryResponse([], { status: 401, contentType: "application/json" })
+        : binaryResponse([0xff, 0xd8, 0xff], { contentType: "image/jpeg" });
+    },
+  });
+  const result = await client.getBinary("/files/2", { maxBytes: 10 });
+  assert.deepEqual(tokens, ["valid-token", "fresh-token"]);
+  assert.equal(result.contentType, "image/jpeg");
+});
+
+test("getBinary failures use fixed messages without response secrets", async () => {
+  const client = makeClient({
+    fetchImpl: async () => new Response("valid-token secret-password", { status: 500 }),
+  });
+  const error = await client.getBinary("/files/3").catch((value) => value);
+  assert.match(error.message, /禅道文件读取失败：HTTP 500/);
+  assert.doesNotMatch(error.message, /valid-token|secret-password/);
+});
 
 test("get uses an existing token without logging in", async () => {
   const calls = [];
