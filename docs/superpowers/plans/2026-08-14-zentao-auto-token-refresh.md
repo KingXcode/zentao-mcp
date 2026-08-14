@@ -26,8 +26,11 @@
 
 - 创建 `lib/env-file.mjs`：安全更新 `.env` 中的 Token。
 - 创建 `lib/zentao-client.mjs`：封装 GET、登录、Token 刷新、单次重试和并发去重。
+- 创建 `lib/runtime-config.mjs`：用 dotenv 加载并校验 MCP 运行配置。
 - 创建 `test/env-file.test.mjs`：真实临时文件上的持久化测试。
 - 创建 `test/zentao-client.test.mjs`：使用受控 Fetch 替身测试认证与请求行为。
+- 创建 `test/runtime-config.test.mjs`：验证 `.env` 加载、特殊字符和可选 Token。
+- 创建 `test/start-script.test.mjs`：验证启动脚本不再通过 shell 解析 `.env`。
 - 修改 `server.mjs`：加载 dotenv、创建客户端并替换内联 HTTP 实现。
 - 修改 `start.sh`：停止用 shell `source` 解析 `.env`。
 - 修改 `package.json`、`package-lock.json`：加入 dotenv、测试和完整语法检查命令。
@@ -189,6 +192,14 @@ test("updateEnvToken leaves the env file readable only by its owner", async () =
 });
 ```
 
+- [ ] **第 7 步：运行新增持久化测试并确认 RED**
+
+运行：`npm test -- test/env-file.test.mjs`
+
+预期：追加、特殊字符、CRLF 或权限测试中至少一项因尚未实现的行为失败；失败应来自断言，而不是测试语法错误。
+
+- [ ] **第 8 步：实现新增持久化行为**
+
 在 `updateEnvToken` 中定义：
 
 ```js
@@ -197,13 +208,13 @@ const newline = original.includes("\r\n") ? "\r\n" : "\n";
 
 追加 Token 时只使用 `newline`；替换正则保持为 `/^(?!\s*#)\s*ZENTAO_TOKEN\s*=[^\r\n]*$/m`，使匹配不吞掉 `\r`。
 
-- [ ] **第 7 步：运行持久化测试并确认 GREEN**
+- [ ] **第 9 步：运行持久化测试并确认 GREEN**
 
 运行：`npm test -- test/env-file.test.mjs`
 
 预期：5 个测试全部通过，无警告。
 
-- [ ] **第 8 步：提交任务 1**
+- [ ] **第 10 步：提交任务 1**
 
 ```bash
 git add package.json lib/env-file.mjs test/env-file.test.mjs
@@ -594,6 +605,9 @@ git commit -m "feat: refresh expired Zentao tokens automatically"
 ### 任务 3：接入 MCP 服务和安全加载配置
 
 **文件：**
+- 创建：`lib/runtime-config.mjs`
+- 创建：`test/runtime-config.test.mjs`
+- 创建：`test/start-script.test.mjs`
 - 修改：`server.mjs:1-55`
 - 修改：`start.sh:1-15`
 - 修改：`package.json`
@@ -609,7 +623,40 @@ git commit -m "feat: refresh expired Zentao tokens automatically"
 
 预期：`package.json` dependencies 出现 `dotenv`，`package-lock.json` 同步更新。
 
-- [ ] **第 2 步：先修改启动脚本，停止 source `.env`**
+- [ ] **第 2 步：编写配置加载与启动脚本失败测试**
+
+创建 `test/runtime-config.test.mjs`，要求 `loadRuntimeConfig(envPath)` 从指定文件返回：`baseUrl`、`apiPrefix`、`initialToken`、`account`、原样保留的 `password`、数值 `timeoutMs` 和绝对 `envPath`。测试至少覆盖空 Token 可用，以及 `ZENTAO_PASSWORD="pa#$$ word"` 不被 shell 展开。
+
+创建 `test/start-script.test.mjs`，读取 `start.sh` 并断言不匹配 `/^\s*\.\s+.*\.env/m`，且匹配 `exec node`。
+
+运行：`npm test -- test/runtime-config.test.mjs test/start-script.test.mjs`
+
+预期：`runtime-config.mjs` 不存在，且当前 `start.sh` 仍包含 `. "$SCRIPT_DIR/.env"`，两个测试均以预期原因失败。
+
+- [ ] **第 3 步：实现安全配置加载与启动脚本**
+
+创建 `lib/runtime-config.mjs`，导出：
+
+```js
+export function loadRuntimeConfig(envPath) {
+  const envResult = loadEnv({ path: envPath, quiet: true, processEnv: {} });
+  if (envResult.error) throw new Error(`无法加载 ${envPath}：${envResult.error.message}`);
+  const values = envResult.parsed || {};
+  const baseUrl = values.ZENTAO_BASE_URL?.trim();
+  if (!baseUrl) throw new Error("缺少环境变量 ZENTAO_BASE_URL");
+  return {
+    envPath: path.resolve(envPath),
+    baseUrl,
+    apiPrefix: values.ZENTAO_API_PREFIX?.trim() || "/api.php/v1",
+    initialToken: values.ZENTAO_TOKEN?.trim() || "",
+    account: values.ZENTAO_ACCOUNT?.trim() || "",
+    password: values.ZENTAO_PASSWORD || "",
+    timeoutMs: Number(values.ZENTAO_TIMEOUT_MS || 15000),
+  };
+}
+```
+
+修改启动脚本，停止 source `.env`：
 
 将 `start.sh` 改为：
 
@@ -622,37 +669,31 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 exec node "$SCRIPT_DIR/server.mjs"
 ```
 
-运行：`sh -n start.sh`
+运行：`npm test -- test/runtime-config.test.mjs test/start-script.test.mjs && sh -n start.sh`
 
-预期：退出码 0。
+预期：两个测试通过，shell 语法退出码 0。
 
-- [ ] **第 3 步：在服务入口加载 `.env` 并创建客户端**
+- [ ] **第 4 步：在服务入口加载 `.env` 并创建客户端**
 
 在 `server.mjs` 顶部加入：
 
 ```js
-import { config as loadEnv } from "dotenv";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { updateEnvToken } from "./lib/env-file.mjs";
 import { createZentaoClient } from "./lib/zentao-client.mjs";
+import { loadRuntimeConfig } from "./lib/runtime-config.mjs";
 
 const projectDirectory = path.dirname(fileURLToPath(import.meta.url));
 const envPath = path.join(projectDirectory, ".env");
-const envResult = loadEnv({ path: envPath, quiet: true });
-if (envResult.error) throw new Error(`无法加载 ${envPath}：${envResult.error.message}`);
+const runtimeConfig = loadRuntimeConfig(envPath);
 ```
 
 把 Token 从必填改为可选并创建客户端：
 
 ```js
 const client = createZentaoClient({
-  baseUrl: requiredEnv("ZENTAO_BASE_URL"),
-  apiPrefix: process.env.ZENTAO_API_PREFIX || "/api.php/v1",
-  initialToken: process.env.ZENTAO_TOKEN?.trim() || "",
-  account: process.env.ZENTAO_ACCOUNT?.trim() || "",
-  password: process.env.ZENTAO_PASSWORD || "",
-  timeoutMs: Number(process.env.ZENTAO_TIMEOUT_MS || 15000),
+  ...runtimeConfig,
   fetchImpl: fetch,
   persistToken: (token) => updateEnvToken(envPath, token),
 });
@@ -665,19 +706,19 @@ const zentaoGet = (path, query) => client.get(path, query);
 同时将 `package.json` 的语法检查扩展为：
 
 ```json
-"check": "node --check server.mjs && node --check lib/env-file.mjs && node --check lib/zentao-client.mjs"
+"check": "node --check server.mjs && node --check lib/env-file.mjs && node --check lib/zentao-client.mjs && node --check lib/runtime-config.mjs"
 ```
 
-- [ ] **第 4 步：运行语法检查和全部单元测试**
+- [ ] **第 5 步：运行语法检查和全部单元测试**
 
 运行：`npm run check && npm test`
 
 预期：所有模块语法检查及测试通过。
 
-- [ ] **第 5 步：提交任务 3**
+- [ ] **第 6 步：提交任务 3**
 
 ```bash
-git add server.mjs start.sh package.json package-lock.json
+git add server.mjs start.sh package.json package-lock.json lib/runtime-config.mjs test/runtime-config.test.mjs test/start-script.test.mjs
 git commit -m "feat: wire automatic authentication into MCP server"
 ```
 
