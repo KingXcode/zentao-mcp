@@ -94,3 +94,15 @@ test("atomicReplaceFile keeps the target unchanged when pre-commit sync fails", 
     assert.deepEqual(events, ["write", "chmod", "stat", "sync", "close", "cleanup"]);
   });
 });
+
+test("atomicReplaceFile uses the Windows ACL model without Unix chmod validation", async () => {
+  await withTargetFile(async (targetPath) => {
+    const events = [];
+    await atomicReplaceFile(targetPath, "new", {
+      platform: "win32",
+      openFile: recordingOpen(events),
+    });
+    assert.equal(await readFile(targetPath, "utf8"), "new");
+    assert.deepEqual(events, ["write", "sync", "close"]);
+  });
+});

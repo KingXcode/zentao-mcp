@@ -1,4 +1,4 @@
-# 禅道 MCP Server（Codex）
+# 禅道 MCP Server
 
 这是一个面向公司禅道的本地只读 MCP Server。目前提供：
 
@@ -13,6 +13,22 @@
 默认按禅道 RESTful API v1 编写。
 
 ## 1. 安装和认证
+
+### 推荐：本地网页安装工具
+
+先安装 [Node.js 20 或更新版本](https://nodejs.org/)，下载或克隆本项目，然后启动：
+
+- macOS：双击项目根目录的 `manage.command`。
+- Windows：双击项目根目录的 `manage.cmd`。
+- Linux 或终端：在项目目录运行 `node scripts/manage-agents.mjs`。
+
+工具会自动补齐 npm 依赖并打开本地网页。填写禅道地址，按需配置账号密码，然后点击对应 Agent 的「安装」；也可以勾选多个 Agent 批量安装或卸载。支持 Codex、Claude Code、Claude Desktop、Cursor、Windsurf、VS Code / GitHub Copilot 和 Gemini CLI。
+
+每次修改前自动备份原配置，保留其他 MCP、设置和注释；卸载只移除指向本项目的 `zentao` 注册，保留项目文件和 `.env`。安装后请保留此目录，重新启动对应 Agent。若已有其他来源的同名 MCP，工具会显示冲突并保留原配置。
+
+工具仅监听本机 `127.0.0.1`，无需部署网页服务。点击网页右上角「关闭工具」即可退出安装工具，已注册的 MCP 可继续使用。完整用法、配置路径和命令行批量操作见 [Agent 安装工具说明](docs/agent-installer.md)。
+
+### 手动安装与凭据配置
 
 ```bash
 cd /path/to/zentao-mcp
@@ -35,11 +51,11 @@ ZENTAO_PASSWORD_ENCODING=
 ZENTAO_TIMEOUT_MS=15000
 ```
 
-首次调用工具且需要登录时，MCP 会自动打开一个新的 macOS Terminal 窗口：
+除网页配置外，macOS 首次调用工具且需要登录时，MCP 也可以自动打开一个新的 Terminal 窗口：
 
 1. 输入禅道账号；账号会正常显示。
 2. 输入并再次确认密码；两次密码均不回显，也不显示星号。
-3. 保存成功后返回 Codex，重新调用刚才的工具；不需要重启 MCP。
+3. 保存成功后返回 Agent，重新调用刚才的工具；不需要重启 MCP。
 
 向导会把账号和密码原子写入项目 `.env`，并将文件权限保持为 `0600`。同一轮凭据缺失状态只会成功打开一个窗口，多个并发工具调用不会反复弹窗。密码为空或两次不一致时会要求重试，最多三次；失败时不修改 `.env`。
 
@@ -47,7 +63,7 @@ ZENTAO_TIMEOUT_MS=15000
 
 账号和密码只在独立 Terminal 的 TTY 中输入，并由本机进程写入 `.env`；它们不是 MCP 工具参数，不进入 Codex 对话、MCP stdio、命令行参数或日志。向导使用 base64url 信封保存凭据，以便引号、换行和 Unicode 等字符精确往返；这只是可逆编码，不是加密。不要把个人账号、密码或 Token 提交到 Git。
 
-## 2. 注册到 Codex
+## 2. 手动注册到 Codex
 
 ```bash
 codex mcp add zentao -- \

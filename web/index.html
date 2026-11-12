@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="zentao-session" content="__SESSION_TOKEN__">
+  <title>禅道 MCP · Agent 安装工具</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="禅道 MCP 首页"><span class="brand-mark">禅</span><span>禅道 <b>MCP</b></span></a>
+    <div class="topbar-actions"><span class="local-indicator">本机运行</span><button class="quiet" id="shutdown" type="button">关闭工具</button></div>
+  </header>
+  <main>
+    <section class="intro">
+      <div><h1>连接你的 Agent</h1><p>让常用的 AI 助手直接查询禅道项目、Bug 和任务。</p></div>
+      <button class="secondary refresh" id="refresh" type="button"><span aria-hidden="true">↻</span> 刷新状态</button>
+    </section>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <div class="workspace">
+      <aside class="connection">
+        <div class="section-title"><h2>禅道连接</h2><span id="connection-state" class="badge muted">读取中</span></div>
+        <p class="connection-description">填写一次，所有 Agent 共用。</p>
+        <form id="settings-form">
+          <label for="base-url">服务器地址</label>
+          <input id="base-url" name="baseUrl" type="url" placeholder="https://zentao.example.com" required autocomplete="url">
+          <details id="credentials-details">
+            <summary>配置账号与密码 <span id="credential-state">可选</span></summary>
+            <div class="credential-fields">
+              <p class="field-hint">已有凭据时，全部留空即可保留。</p>
+              <label for="account">禅道账号</label>
+              <input id="account" name="account" type="text" autocomplete="off" placeholder="你的禅道账号">
+              <label for="password">密码</label>
+              <input id="password" name="password" type="password" autocomplete="new-password" placeholder="输入新密码">
+              <label for="password-confirm">确认密码</label>
+              <input id="password-confirm" type="password" autocomplete="new-password" placeholder="再次输入密码">
+            </div>
+          </details>
+          <button class="primary save-settings" type="submit">保存连接</button>
+          <p class="field-hint">凭据仅保存在本项目的 <code>.env</code>，不会写入各 Agent 的配置。</p>
+        </form>
+        <div class="project-location"><span>项目位置</span><code id="project-path">正在读取…</code><p>安装后请保留此目录。</p></div>
+      </aside>
+      <section class="agents-panel" aria-labelledby="agents-heading">
+        <div class="agents-heading"><div><h2 id="agents-heading">Agent 列表</h2><p>安装到当前用户，适用于所有项目。</p></div><span id="installed-count" class="count"></span></div>
+        <div class="batch-bar">
+          <label class="select-all"><input id="select-all" type="checkbox"><span id="selection-label">全选</span></label>
+          <div><button class="quiet" id="uninstall-selected" type="button" disabled>卸载所选</button><button class="primary compact" id="install-selected" type="button" disabled>安装所选</button></div>
+        </div>
+        <div id="agent-list" aria-busy="true"><p class="loading">正在读取本机配置…</p></div>
+        <div class="panel-note"><span aria-hidden="true">✓</span> 保留其他 MCP 配置，修改前自动备份。安装或卸载后请重新启动对应 Agent。</div>
+      </section>
+    </div>
+    <section class="activity" aria-labelledby="activity-heading">
+      <div class="section-title"><h2 id="activity-heading">操作记录</h2><button class="quiet" id="clear-log" type="button">清空记录</button></div>
+      <p id="empty-log">安装、卸载和连接配置的结果会显示在这里。</p>
+      <ol id="activity-log" aria-live="polite"></ol>
+    </section>
+    <footer><span>禅道 MCP 安装工具</span><span>本地配置管理，不会自动调用禅道接口。</span></footer>
+  </main>
+  <template id="agent-template">
+    <article class="agent-row">
+      <div class="agent-main">
+        <input class="agent-checkbox" type="checkbox">
+        <span class="agent-icon" aria-hidden="true"></span>
+        <div class="agent-identity"><h3></h3><span class="agent-description"></span></div>
+        <span class="badge agent-state"></span>
+        <button class="agent-action secondary" type="button"></button>
+      </div>
+      <details class="agent-details"><summary>配置位置</summary><code class="config-path"></code><p class="agent-error" hidden></p></details>
+    </article>
+  </template>
+</body>
+</html>

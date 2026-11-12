@@ -3,14 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.mjs",
+    "mcp:manage": "node scripts/manage-agents.mjs",
+    "mcp:install": "node scripts/manage-agents.mjs install",
+    "mcp:uninstall": "node scripts/manage-agents.mjs uninstall",
+    "mcp:status": "node scripts/manage-agents.mjs status",
     "test": "node --test",
-    "check": "node --check server.mjs && node --check lib/atomic-file.mjs && node --check lib/credential-env-codec.mjs && node --check lib/credential-wizard.mjs && node --check lib/env-credentials.mjs && node --check lib/env-file.mjs && node --check lib/mcp-output.mjs && node --check lib/runtime-client.mjs && node --check lib/runtime-config.mjs && node --check lib/terminal-input.mjs && node --check lib/token-env-codec.mjs && node --check lib/zentao-bug-service.mjs && node --check lib/zentao-client.mjs && node --check scripts/configure-credentials.mjs"
+    "check": "node --check server.mjs && node --check lib/atomic-file.mjs && node --check lib/credential-env-codec.mjs && node --check lib/credential-wizard.mjs && node --check lib/env-credentials.mjs && node --check lib/env-file.mjs && node --check lib/mcp-output.mjs && node --check lib/runtime-client.mjs && node --check lib/runtime-config.mjs && node --check lib/terminal-input.mjs && node --check lib/token-env-codec.mjs && node --check lib/zentao-bug-service.mjs && node --check lib/zentao-client.mjs && node --check scripts/configure-credentials.mjs && node --check lib/agent-config.mjs && node --check lib/agent-manager.mjs && node --check lib/agent-web.mjs && node --check scripts/manage-agents.mjs && node --check web/app.js"
   },
   "dependencies": {
+    "@decimalturn/toml-patch": "3.3.2",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "dotenv": "^17.4.2",
+    "jsonc-parser": "3.3.1",
     "zod": "^3.23.8"
   }
 }
